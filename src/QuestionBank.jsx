@@ -21,6 +21,7 @@ const emptyForm = {
 
 function QuestionBank() {
   const navigate = useNavigate();
+
   const [questions, setQuestions] = useState([]);
   const [form, setForm] = useState(emptyForm);
   const [editingId, setEditingId] = useState(null);
@@ -35,19 +36,21 @@ function QuestionBank() {
     setLoading(true);
     setError("");
 
-    const { data, error } = await supabase
-      .from("quiz_questions")
-      .select("*")
-      .order("created_at", { ascending: false });
+    try {
+      const { data, error } = await supabase
+        .from("quiz_questions")
+        .select("*")
+        .order("created_at", { ascending: false });
 
-    if (error) {
-      setError(error.message);
-      setQuestions([]);
-    } else {
+      if (error) throw error;
+
       setQuestions(data || []);
+    } catch (err) {
+      setError(err.message || "Unable to load questions.");
+      setQuestions([]);
+    } finally {
+      setLoading(false);
     }
-
-    setLoading(false);
   };
 
   useEffect(() => {
@@ -74,20 +77,30 @@ function QuestionBank() {
 
   const openNewForm = () => {
     setEditingId(null);
-    setForm(emptyForm);
+    setForm({ ...emptyForm, options: [...emptyForm.options] });
     setMessage("");
+    setError("");
     setShowForm(true);
   };
 
   const openEditForm = (question) => {
     setEditingId(question.id);
+
     setForm({
-      ...question,
+      section: question.section || "A",
+      question_type: question.question_type || "true_false",
+      question_text: question.question_text || "",
       options: Array.isArray(question.options)
-        ? question.options
+        ? [...question.options, "", "", "", ""].slice(0, 4)
         : ["", "", "", ""],
+      correct_answer: question.correct_answer || "True",
+      topic: question.topic || "",
+      difficulty: question.difficulty || "Foundation",
+      explanation: question.explanation || "",
     });
+
     setMessage("");
+    setError("");
     setShowForm(true);
   };
 
@@ -96,70 +109,102 @@ function QuestionBank() {
     setMessage("");
     setError("");
 
-    if (!form.question_text.trim() || !form.topic.trim()) {
+    const questionText = (form.question_text || "").trim();
+    const topic = (form.topic || "").trim();
+    const explanation = (form.explanation || "").trim();
+
+    if (!questionText || !topic) {
       setMessage("Please enter the question and topic.");
       return;
     }
 
-    if (
-      form.question_type === "mcq" &&
-      (form.options.some((option) => !option.trim()) ||
-        !form.correct_answer.trim())
-    ) {
-      setMessage("Enter all four options and select the correct answer.");
-      return;
+    if (form.question_type === "mcq") {
+      const options = (form.options || []).map((option) =>
+        (option || "").trim()
+      );
+
+      if (options.some((option) => !option)) {
+        setMessage("Please enter all four options.");
+        return;
+      }
+
+      if (!form.correct_answer || !options.includes(form.correct_answer)) {
+        setMessage("Please select the correct answer.");
+        return;
+      }
+
+      if (new Set(options).size !== 4) {
+        setMessage("All four options must be different.");
+        return;
+      }
     }
 
     if (
       form.question_type === "true_false" &&
       !["True", "False"].includes(form.correct_answer)
     ) {
-      setMessage("Select the correct True/False answer.");
+      setMessage("Please select True or False.");
       return;
     }
 
-    setSaving(true);
-
     const payload = {
-      section: form.section,
+      section: form.question_type === "true_false" ? "A" : "B",
       question_type: form.question_type,
-      question_text: form.question_text.trim(),
+      question_text: questionText,
       options:
         form.question_type === "mcq"
           ? form.options.map((option) => option.trim())
           : null,
       correct_answer: form.correct_answer,
-      topic: form.topic.trim(),
+      topic,
       difficulty: form.difficulty,
-      explanation: form.explanation.trim() || null,
+      explanation: explanation || null,
       updated_at: new Date().toISOString(),
     };
 
+    setSaving(true);
+
     try {
-      // Selecting the updated row confirms that the database actually changed it.
-      const result = editingId
-        ? await supabase
-            .from("quiz_questions")
-            .update(payload)
-            .eq("id", editingId)
-            .select("id")
-            .single()
-        : await supabase
-            .from("quiz_questions")
-            .insert(payload)
-            .select("id")
-            .single();
+      let result;
 
-      if (result.error) throw result.error;
-      if (!result.data?.id) throw new Error("No record was updated. Check the admin permissions.");
+      if (editingId) {
+        result = await supabase
+          .from("quiz_questions")
+          .update(payload)
+          .eq("id", editingId)
+          .select("id")
+          .maybeSingle();
+      } else {
+        result = await supabase
+          .from("quiz_questions")
+          .insert(payload)
+          .select("id")
+          .single();
+      }
 
-      setMessage(editingId ? "Question updated successfully." : "Question added successfully.");
+      if (result.error) {
+        throw result.error;
+      }
+
+      if (!result.data?.id) {
+        throw new Error(
+          "No question was updated. Please check your admin permissions and database policies."
+        );
+      }
+
+      setMessage(
+        editingId
+          ? "Question updated successfully!"
+          : "Question added successfully!"
+      );
+
       setShowForm(false);
-      setForm(emptyForm);
+      setForm({ ...emptyForm, options: [...emptyForm.options] });
       setEditingId(null);
+
       await loadQuestions();
-    } catch (saveError) {
-      setMessage(saveError.message || "Unable to save question.");
+    } catch (err) {
+      setMessage(err.message || "Unable to save question.");
     } finally {
       setSaving(false);
     }
@@ -170,15 +215,19 @@ function QuestionBank() {
       return;
     }
 
-    const { error } = await supabase
-      .from("quiz_questions")
-      .delete()
-      .eq("id", id);
+    setError("");
 
-    if (error) {
-      setError(error.message);
-    } else {
+    try {
+      const { error } = await supabase
+        .from("quiz_questions")
+        .delete()
+        .eq("id", id);
+
+      if (error) throw error;
+
       await loadQuestions();
+    } catch (err) {
+      setError(err.message || "Unable to delete question.");
     }
   };
 
@@ -186,16 +235,21 @@ function QuestionBank() {
     const term = search.toLowerCase();
 
     return (
-      question.question_text.toLowerCase().includes(term) ||
-      question.topic.toLowerCase().includes(term)
+      (question.question_text || "").toLowerCase().includes(term) ||
+      (question.topic || "").toLowerCase().includes(term)
     );
   });
 
   return (
     <main className="qb-page">
       <div className="qb-container">
-        <button className="qb-back" onClick={() => navigate("/admin")}>
-          <ArrowLeft size={18} /> Back to Admin Dashboard
+
+        <button
+          className="qb-back"
+          onClick={() => navigate("/admin")}
+        >
+          <ArrowLeft size={18} />
+          Back to Admin Dashboard
         </button>
 
         <header className="qb-heading">
@@ -206,11 +260,17 @@ function QuestionBank() {
           </div>
 
           <div className="qb-head-actions">
-            <button className="qb-import" onClick={() => navigate("/admin/questions/import")}>
-              <FileUp size={18} /> Import PDF
+            <button
+              className="qb-import"
+              onClick={() => navigate("/admin/questions/import")}
+            >
+              <FileUp size={18} />
+              Import PDF
             </button>
+
             <button className="qb-add" onClick={openNewForm}>
-              <Plus size={18} /> Add Question
+              <Plus size={18} />
+              Add Question
             </button>
           </div>
         </header>
@@ -225,21 +285,34 @@ function QuestionBank() {
 
         {showForm && (
           <section className="qb-form-card">
+
             <div className="qb-form-heading">
               <h2>{editingId ? "EDIT QUESTION" : "ADD NEW QUESTION"}</h2>
-              <button type="button" onClick={() => setShowForm(false)}>
+
+              <button
+                type="button"
+                onClick={() => {
+                  setShowForm(false);
+                  setMessage("");
+                }}
+              >
                 <X size={20} />
               </button>
             </div>
 
             <form onSubmit={handleSave}>
+
               <label>Question Type</label>
               <select
                 value={form.question_type}
                 onChange={(e) => changeType(e.target.value)}
               >
-                <option value="true_false">True / False — Section A</option>
-                <option value="mcq">Multiple Choice — Section B</option>
+                <option value="true_false">
+                  True / False — Section A
+                </option>
+                <option value="mcq">
+                  Multiple Choice — Section B
+                </option>
               </select>
 
               <label>Question</label>
@@ -256,11 +329,14 @@ function QuestionBank() {
               {form.question_type === "mcq" && (
                 <>
                   <label>Four Options</label>
+
                   {form.options.map((option, index) => (
                     <input
                       key={index}
                       value={option}
-                      onChange={(e) => updateOption(index, e.target.value)}
+                      onChange={(e) =>
+                        updateOption(index, e.target.value)
+                      }
                       placeholder={`Option ${index + 1}`}
                       required
                     />
@@ -270,11 +346,15 @@ function QuestionBank() {
                   <select
                     value={form.correct_answer}
                     onChange={(e) =>
-                      setForm({ ...form, correct_answer: e.target.value })
+                      setForm({
+                        ...form,
+                        correct_answer: e.target.value,
+                      })
                     }
                     required
                   >
                     <option value="">Select correct option</option>
+
                     {form.options.map((option, index) => (
                       <option
                         key={index}
@@ -294,7 +374,10 @@ function QuestionBank() {
                   <select
                     value={form.correct_answer}
                     onChange={(e) =>
-                      setForm({ ...form, correct_answer: e.target.value })
+                      setForm({
+                        ...form,
+                        correct_answer: e.target.value,
+                      })
                     }
                   >
                     <option value="True">True</option>
@@ -328,7 +411,9 @@ function QuestionBank() {
                   "Advanced",
                   "Expert",
                 ].map((level) => (
-                  <option key={level}>{level}</option>
+                  <option key={level} value={level}>
+                    {level}
+                  </option>
                 ))}
               </select>
 
@@ -342,23 +427,34 @@ function QuestionBank() {
                 placeholder="Enter explanation..."
               />
 
-              {message && <p className="qb-message">{message}</p>}
+              {message && (
+                <p className="qb-message" role="alert">
+                  {message}
+                </p>
+              )}
 
-              <button className="qb-save" type="submit" disabled={saving}>
+              <button
+                className="qb-save"
+                type="submit"
+                disabled={saving}
+              >
                 <Save size={17} />
                 {saving ? "Saving..." : "Save Question"}
               </button>
+
             </form>
           </section>
         )}
 
         <div className="qb-search">
           <Search size={19} />
+
           <input
             value={search}
             onChange={(e) => setSearch(e.target.value)}
             placeholder="Search questions or topics..."
           />
+
           <button onClick={loadQuestions} disabled={loading}>
             <RefreshCw size={17} />
           </button>
@@ -369,18 +465,28 @@ function QuestionBank() {
         {loading ? (
           <p className="qb-empty">Loading questions...</p>
         ) : filteredQuestions.length === 0 ? (
-          <p className="qb-empty">No questions found. Add your first question.</p>
+          <p className="qb-empty">
+            No questions found. Add your first question.
+          </p>
         ) : (
           <section className="qb-list">
             {filteredQuestions.map((question, index) => (
               <article className="qb-question-card" key={question.id}>
+
                 <div className="qb-question-top">
                   <span>QUESTION {index + 1}</span>
-                  <span>{question.question_type === "mcq" ? "MCQ" : "TRUE / FALSE"}</span>
+                  <span>
+                    {question.question_type === "mcq"
+                      ? "MCQ"
+                      : "TRUE / FALSE"}
+                  </span>
                 </div>
 
                 <h3>{question.question_text}</h3>
-                <p>Topic: {question.topic} · {question.difficulty}</p>
+
+                <p>
+                  Topic: {question.topic} · {question.difficulty}
+                </p>
 
                 {question.question_type === "mcq" && (
                   <ol className="qb-options">
@@ -396,16 +502,21 @@ function QuestionBank() {
 
                 <div className="qb-actions">
                   <button onClick={() => openEditForm(question)}>
-                    <Pencil size={16} /> Edit
+                    <Pencil size={16} />
+                    Edit
                   </button>
+
                   <button onClick={() => deleteQuestion(question.id)}>
-                    <Trash2 size={16} /> Delete
+                    <Trash2 size={16} />
+                    Delete
                   </button>
                 </div>
+
               </article>
             ))}
           </section>
         )}
+
       </div>
     </main>
   );
