@@ -1,0 +1,148 @@
+
+.admin-login-page {
+  min-height: 70vh;
+  padding: 40px 15px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background: #f5f3e9;
+}
+
+.admin-login-card {
+  width: 100%;
+  max-width: 450px;
+  padding: 38px;
+  text-align: center;
+  background: #fffefa;
+  border: 1px solid #d5bd83;
+  border-radius: 16px;
+  box-shadow: 0 14px 40px rgba(6,78,54,.12);
+}
+
+.admin-login-icon {
+  width: 72px;
+  height: 72px;
+  margin: 0 auto 17px;
+  display: grid;
+  place-items: center;
+  color: white;
+  background: #064e36;
+  border: 2px solid #d1ae62;
+  border-radius: 50%;
+}
+
+.admin-login-label {
+  color: #a17c32;
+  font-size: 11px;
+  font-weight: 800;
+  letter-spacing: 2px;
+}
+
+.admin-login-card h1 {
+  color: #064e36;
+  font-size: 28px;
+  font-weight: 800;
+  margin: 9px 0;
+}
+
+.admin-login-subtitle {
+  color: #718578;
+  font-size: 11px;
+  letter-spacing: .8px;
+  margin-bottom: 28px;
+}
+
+.admin-login-form {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  text-align: left;
+}
+
+.admin-login-form label {
+  color: #145b38;
+  font-size: 13px;
+  font-weight: 700;
+}
+
+.admin-login-input {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 0 12px;
+  color: #176b43;
+  background: white;
+  border: 1px solid #d9e4dc;
+  border-radius: 8px;
+}
+
+.admin-login-input:focus-within {
+  border-color: #176b43;
+  box-shadow: 0 0 0 3px rgba(23,107,67,.08);
+}
+
+.admin-login-input input {
+  width: 100%;
+  min-width: 0;
+  padding: 14px 0;
+  border: none;
+  outline: none;
+  color: #263b2e;
+  background: transparent;
+  font-size: 14px;
+}
+
+.admin-login-input button {
+  display: flex;
+  padding: 5px;
+  border: none;
+  color: #176b43;
+  background: transparent;
+  cursor: pointer;
+}
+
+.admin-login-button {
+  margin-top: 12px;
+  padding: 15px;
+  color: white;
+  background: #064e36;
+  border: 2px solid #c6a04a;
+  border-radius: 8px;
+  font-size: 13px;
+  font-weight: 800;
+  cursor: pointer;
+}
+
+.admin-login-button:hover {
+  background: #0b6848;
+}
+
+.admin-login-button:disabled {
+  opacity: .65;
+  cursor: not-allowed;
+}
+
+.admin-login-message {
+  padding: 11px;
+  color: #9b3030;
+  background: #fff0ed;
+  border: 1px solid #f0d1ca;
+  border-radius: 7px;
+  font-size: 12px;
+  line-height: 1.5;
+}
+
+.admin-login-home {
+  display: inline-block;
+  margin-top: 24px;
+  color: #176b43;
+  font-size: 12px;
+  font-weight: 700;
+  text-decoration: none;
+}
+
+@media (max-width: 550px) {
+  .admin-login-card {
+    padding: 28px 20px;
+  }
+}

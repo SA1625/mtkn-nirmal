@@ -1,26 +1,27 @@
+
 import React, { useState } from "react";
-import { useNavigate } from "react-router-dom";
+import { Link, useNavigate } from "react-router-dom";
+import { Eye, EyeOff, LockKeyhole, Mail } from "lucide-react";
 import { supabase } from "./supabase";
-import { Eye, EyeOff } from "lucide-react";
 import "./Login.css";
 
 function Login() {
-    const navigate = useNavigate();
+  const navigate = useNavigate();
+
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
   const [showPassword, setShowPassword] = useState(false);
   const [loading, setLoading] = useState(false);
-  const [resetLoading, setResetLoading] = useState(false);
   const [message, setMessage] = useState("");
 
   const handleLogin = async (e) => {
     e.preventDefault();
-    setLoading(true);
     setMessage("");
+    setLoading(true);
 
     try {
       const { error } = await supabase.auth.signInWithPassword({
-        email,
+        email: email.trim(),
         password,
       });
 
@@ -35,17 +36,18 @@ function Login() {
   };
 
   const handleForgotPassword = async () => {
+    setMessage("");
+
     if (!email.trim()) {
       setMessage("Please enter your registered email address first.");
       return;
     }
 
-    setResetLoading(true);
-    setMessage("");
+    setLoading(true);
 
     try {
       const { error } = await supabase.auth.resetPasswordForEmail(
-        email,
+        email.trim(),
         {
           redirectTo: `${window.location.origin}/reset-password`,
         }
@@ -53,68 +55,75 @@ function Login() {
 
       if (error) throw error;
 
-      setMessage("Password reset email sent. Please check your inbox.");
+      setMessage("Password reset link sent. Please check your email.");
     } catch (error) {
       setMessage(error.message);
     } finally {
-      setResetLoading(false);
+      setLoading(false);
     }
   };
 
   return (
-    <section className="login-section">
+    <main className="login-section">
       <div className="login-card">
-        <h2>Candidate Login</h2>
+
+        <div className="login-icon">
+          <LockKeyhole size={32} />
+        </div>
+
+        <h2>CANDIDATE LOGIN</h2>
 
         <p className="login-subtitle">
-          Login to your Islamic Quiz account
+          Welcome back to Islamic Quiz 2026
         </p>
 
-        <form className="login-form" onSubmit={handleLogin}>
-          <div className="form-group">
-            <label>Email Address</label>
+        <form onSubmit={handleLogin} className="login-form">
 
-            <input
-              type="email"
-              value={email}
-              onChange={(e) => setEmail(e.target.value)}
-              required
-              placeholder="Enter your email"
-            />
+          <div className="login-form-group">
+            <label>Email Address</label>
+            <div className="login-input-wrap">
+              <Mail size={19} />
+              <input
+                type="email"
+                value={email}
+                onChange={(e) => setEmail(e.target.value)}
+                placeholder="Enter registered email"
+                required
+              />
+            </div>
           </div>
 
-          <div className="form-group">
+          <div className="login-form-group">
             <label>Password</label>
-
-            <div className="password-input-wrapper">
+            <div className="login-input-wrap">
+              <LockKeyhole size={19} />
               <input
                 type={showPassword ? "text" : "password"}
                 value={password}
                 onChange={(e) => setPassword(e.target.value)}
-                required
                 placeholder="Enter your password"
+                required
               />
 
               <button
                 type="button"
                 className="password-toggle"
                 onClick={() => setShowPassword(!showPassword)}
-                aria-label={showPassword ? "Hide password" : "Show password"}
+                aria-label="Toggle password visibility"
               >
                 {showPassword ? <EyeOff size={19} /> : <Eye size={19} />}
               </button>
             </div>
           </div>
 
-          <div className="forgot-password">
-            <button
-              type="button"
-              onClick={handleForgotPassword}
-              disabled={resetLoading}
-            >
-              {resetLoading ? "Sending..." : "Forgot Password?"}
-            </button>
-          </div>
+          <button
+            type="button"
+            className="forgot-password"
+            onClick={handleForgotPassword}
+            disabled={loading}
+          >
+            Forgot Password?
+          </button>
 
           {message && (
             <p className="login-message" role="status">
@@ -127,11 +136,21 @@ function Login() {
             className="login-button"
             disabled={loading}
           >
-            {loading ? "Logging in..." : "Login"}
+            {loading ? "PLEASE WAIT..." : "LOGIN TO YOUR ACCOUNT"}
           </button>
+
         </form>
+
+        <p className="register-link">
+          New candidate? <Link to="/register">Register here</Link>
+        </p>
+
+        <Link to="/" className="back-home">
+          Back to Home
+        </Link>
+
       </div>
-    </section>
+    </main>
   );
 }
 

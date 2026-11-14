@@ -1,0 +1,255 @@
+
+.admin-page {
+  min-height: 70vh;
+  padding: 35px 18px;
+  background: #f5f3e9;
+  color: #173f2d;
+}
+
+.admin-container {
+  max-width: 1150px;
+  margin: auto;
+}
+
+.admin-topbar {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 15px;
+  margin-bottom: 28px;
+}
+
+.admin-heading {
+  display: flex;
+  align-items: center;
+  gap: 13px;
+}
+
+.admin-heading-icon {
+  width: 52px;
+  height: 52px;
+  display: grid;
+  place-items: center;
+  color: white;
+  background: #064e36;
+  border: 2px solid #c6a04a;
+  border-radius: 12px;
+}
+
+.admin-heading h1 {
+  margin: 0;
+  color: #064e36;
+  font-size: 22px;
+  font-weight: 800;
+}
+
+.admin-heading p {
+  margin: 5px 0 0;
+  color: #7b8b80;
+  font-size: 11px;
+  letter-spacing: 1px;
+}
+
+.admin-logout {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 11px 16px;
+  color: white;
+  background: #064e36;
+  border: 1px solid #c6a04a;
+  border-radius: 8px;
+  font-weight: 700;
+  cursor: pointer;
+}
+
+.admin-welcome {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 20px;
+  padding: 27px;
+  color: white;
+  background: #064e36;
+  border: 1px solid #c6a04a;
+  border-radius: 14px;
+  box-shadow: 0 8px 25px rgba(6,78,54,.12);
+}
+
+.admin-eyebrow {
+  margin: 0 0 8px;
+  color: #e0c889;
+  font-size: 11px;
+  font-weight: 800;
+  letter-spacing: 1.5px;
+}
+
+.admin-welcome h2 {
+  margin: 0 0 8px;
+  font-size: 25px;
+}
+
+.admin-welcome p:last-child {
+  margin: 0;
+  color: #d8e8dd;
+  font-size: 13px;
+}
+
+.admin-role {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 11px 14px;
+  color: #fff4d8;
+  background: rgba(255,255,255,.1);
+  border: 1px solid rgba(209,174,98,.6);
+  border-radius: 8px;
+  font-size: 12px;
+  font-weight: 800;
+  white-space: nowrap;
+}
+
+.admin-section-title {
+  margin: 32px 0 17px;
+}
+
+.admin-section-title h2 {
+  margin: 0;
+  color: #064e36;
+  font-size: 18px;
+  font-weight: 800;
+}
+
+.admin-section-title p {
+  margin: 5px 0 0;
+  color: #849187;
+  font-size: 13px;
+}
+
+.admin-module-grid {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 17px;
+}
+
+.admin-module-card {
+  padding: 23px;
+  background: #fffefa;
+  border: 1px solid #dfd3b5;
+  border-radius: 12px;
+  box-shadow: 0 5px 18px rgba(6,78,54,.05);
+}
+
+.admin-module-icon {
+  width: 47px;
+  height: 47px;
+  display: grid;
+  place-items: center;
+  color: #176b43;
+  background: #eaf3ec;
+  border-radius: 10px;
+}
+
+.admin-module-card h3 {
+  margin: 17px 0 8px;
+  color: #145b38;
+  font-size: 16px;
+}
+
+.admin-module-card p {
+  min-height: 40px;
+  margin: 0 0 16px;
+  color: #78867d;
+  font-size: 12px;
+  line-height: 1.6;
+}
+
+.admin-module-status {
+  display: inline-block;
+  padding: 6px 10px;
+  color: #176b43;
+  background: #eaf3ec;
+  border-radius: 20px;
+  font-size: 10px;
+  font-weight: 800;
+}
+
+.admin-module-status.restricted {
+  color: #936c23;
+  background: #f8f0dc;
+}
+
+.admin-notice {
+  margin-top: 25px;
+  color: #879187;
+  font-size: 11px;
+  text-align: center;
+}
+
+.admin-loading,
+.admin-denied {
+  min-height: 55vh;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 12px;
+  padding: 25px;
+  text-align: center;
+  color: #145b38;
+  background: #f5f3e9;
+}
+
+.admin-denied h2 {
+  margin: 0;
+  color: #064e36;
+}
+
+.admin-denied p {
+  max-width: 420px;
+  color: #718578;
+}
+
+.admin-denied button {
+  padding: 12px 18px;
+  color: white;
+  background: #064e36;
+  border: none;
+  border-radius: 8px;
+  cursor: pointer;
+}
+
+@media (max-width: 800px) {
+  .admin-module-grid {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+}
+
+@media (max-width: 550px) {
+  .admin-page {
+    padding: 25px 13px;
+  }
+
+  .admin-topbar {
+    align-items: flex-start;
+  }
+
+  .admin-heading h1 {
+    font-size: 16px;
+  }
+
+  .admin-logout {
+    padding: 9px;
+    font-size: 12px;
+  }
+
+  .admin-welcome {
+    align-items: flex-start;
+    flex-direction: column;
+    padding: 21px;
+  }
+
+  .admin-module-grid {
+    grid-template-columns: 1fr;
+  }
+}
