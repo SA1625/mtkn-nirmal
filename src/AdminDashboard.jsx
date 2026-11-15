@@ -2,14 +2,25 @@
 import React, { useEffect, useState } from "react";
 import { useNavigate } from "react-router-dom";
 import {
-  Users, BookOpen, ClipboardList, Trophy,
-  Settings, ShieldCheck, LogOut, LayoutDashboard
+  Users,
+  BookOpen,
+  ClipboardList,
+  Trophy,
+  Settings,
+  ShieldCheck,
+  LogOut,
+  LayoutDashboard,
+  FileUp,
+  Sparkles,
+  UserCog
 } from "lucide-react";
+
 import { supabase } from "./supabase";
 import "./AdminDashboard.css";
 
 function AdminDashboard() {
   const navigate = useNavigate();
+
   const [profile, setProfile] = useState(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState("");
@@ -74,7 +85,7 @@ function AdminDashboard() {
   const modules = [
     {
       title: "Candidate Management",
-      description: "View registered candidates.",
+      description: "View and manage registered candidates.",
       icon: Users,
       path: "/admin/candidates",
       status: "Open Module"
@@ -87,6 +98,20 @@ function AdminDashboard() {
       status: "Open Module"
     },
     {
+      title: "PDF Import & OCR",
+      description: "Upload scanned PDFs and extract questions.",
+      icon: FileUp,
+      path: "/admin/questions/import",
+      status: "Open Module"
+    },
+    {
+      title: "AI Question Review",
+      description: "Review, edit, approve and reject AI drafts.",
+      icon: Sparkles,
+      path: "/admin/question-review",
+      status: "Open Module"
+    },
+    {
       title: "Examination Management",
       description: "Create, schedule and manage examinations.",
       icon: ClipboardList,
@@ -95,14 +120,16 @@ function AdminDashboard() {
     },
     {
       title: "Results & Rankings",
-      description: "View marks and candidate rankings.",
+      description: "View marks, performance and rankings.",
       icon: Trophy,
-      status: "Coming next"
+      path: "/admin/results",
+      status: "Open Module"
     },
     {
       title: "Admin Management",
-      description: "Manage administrator permissions.",
-      icon: Users,
+      description: "Manage administrator accounts and permissions.",
+      icon: UserCog,
+      path: isSuperAdmin ? "/admin/management" : null,
       status: isSuperAdmin ? "Super Admin" : "Restricted",
       restricted: !isSuperAdmin
     },
@@ -110,6 +137,7 @@ function AdminDashboard() {
       title: "Portal Settings",
       description: "Configure portal preferences.",
       icon: Settings,
+      path: "/admin/settings",
       status: "Coming next"
     }
   ];
@@ -117,6 +145,7 @@ function AdminDashboard() {
   return (
     <main className="admin-page">
       <div className="admin-container">
+
         <div className="admin-topbar">
           <div className="admin-heading">
             <div className="admin-heading-icon">
@@ -129,7 +158,8 @@ function AdminDashboard() {
           </div>
 
           <button className="admin-logout" onClick={handleLogout}>
-            <LogOut size={17} /> Logout
+            <LogOut size={17} />
+            Logout
           </button>
         </div>
 
@@ -160,7 +190,9 @@ function AdminDashboard() {
                 className="admin-module-card"
                 key={module.title}
                 onClick={() => module.path && navigate(module.path)}
-                style={{ cursor: module.path ? "pointer" : "default" }}
+                style={{
+                  cursor: module.path ? "pointer" : "default"
+                }}
               >
                 <div className="admin-module-icon">
                   <Icon size={25} />
@@ -169,11 +201,13 @@ function AdminDashboard() {
                 <h3>{module.title}</h3>
                 <p>{module.description}</p>
 
-                <span className={
-                  module.restricted
-                    ? "admin-module-status restricted"
-                    : "admin-module-status"
-                }>
+                <span
+                  className={
+                    module.restricted
+                      ? "admin-module-status restricted"
+                      : "admin-module-status"
+                  }
+                >
                   {module.status}
                 </span>
               </article>
@@ -184,6 +218,7 @@ function AdminDashboard() {
         <p className="admin-notice">
           Administrator access is subject to assigned permissions.
         </p>
+
       </div>
     </main>
   );

@@ -1,9 +1,9 @@
 
-import React, { useEffect, useState } from "react";
+import React, { useEffect, useMemo, useState } from "react";
 import { useNavigate } from "react-router-dom";
 import {
   ArrowLeft, Plus, Search, RefreshCw, Trash2, Pencil,
-  BookOpen, X, Save, FileUp
+  BookOpen, X, Save, FileUp, Sparkles, Filter, Eye
 } from "lucide-react";
 import { supabase } from "./supabase";
 import "./QuestionBank.css";
@@ -19,6 +19,11 @@ const emptyForm = {
   explanation: "",
 };
 
+const difficulties = [
+  "Foundation", "Beginner", "Intermediate",
+  "Moderate", "Advanced", "Expert"
+];
+
 function QuestionBank() {
   const navigate = useNavigate();
 
@@ -26,7 +31,14 @@ function QuestionBank() {
   const [form, setForm] = useState(emptyForm);
   const [editingId, setEditingId] = useState(null);
   const [showForm, setShowForm] = useState(false);
+  const [selectedQuestion, setSelectedQuestion] = useState(null);
+
   const [search, setSearch] = useState("");
+  const [typeFilter, setTypeFilter] = useState("all");
+  const [difficultyFilter, setDifficultyFilter] = useState("all");
+  const [topicFilter, setTopicFilter] = useState("all");
+  const [sourceFilter, setSourceFilter] = useState("all");
+
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
   const [message, setMessage] = useState("");
@@ -40,6 +52,7 @@ function QuestionBank() {
       const { data, error } = await supabase
         .from("quiz_questions")
         .select("*")
+        .eq("review_status", "approved")
         .order("created_at", { ascending: false });
 
       if (error) throw error;
@@ -56,6 +69,19 @@ function QuestionBank() {
   useEffect(() => {
     loadQuestions();
   }, []);
+
+  const topics = useMemo(
+    () => [...new Set(questions.map((q) => q.topic).filter(Boolean))].sort(),
+    [questions]
+  );
+
+  const stats = useMemo(() => ({
+    total: questions.length,
+    trueFalse: questions.filter((q) => q.question_type === "true_false").length,
+    mcq: questions.filter((q) => q.question_type === "mcq").length,
+    ai: questions.filter((q) => q.ai_generated).length,
+    manual: questions.filter((q) => !q.ai_generated).length,
+  }), [questions]);
 
   const changeType = (type) => {
     setForm((prev) => ({
@@ -109,8 +135,8 @@ function QuestionBank() {
     setMessage("");
     setError("");
 
-    const questionText = (form.question_text || "").trim();
-    const topic = (form.topic || "").trim();
+    const questionText = form.question_text.trim();
+    const topic = form.topic.trim();
     const explanation = (form.explanation || "").trim();
 
     if (!questionText || !topic) {
@@ -118,30 +144,44 @@ function QuestionBank() {
       return;
     }
 
-    if (form.question_type === "mcq") {
-      const options = (form.options || []).map((option) =>
-        (option || "").trim()
+    const duplicate = questions.find(
+      (q) =>
+        q.id !== editingId &&
+        q.question_text.trim().toLowerCase() === questionText.toLowerCase()
+    );
+
+    if (duplicate) {
+      setMessage(
+        `Duplicate question found. Existing question ID: ${duplicate.id}`
       );
+      return;
+    }
+
+    let options = null;
+    let correctAnswer = form.correct_answer.trim();
+
+    if (form.question_type === "mcq") {
+      options = form.options.map((option) => option.trim());
 
       if (options.some((option) => !option)) {
         setMessage("Please enter all four options.");
         return;
       }
 
-      if (!form.correct_answer || !options.includes(form.correct_answer)) {
-        setMessage("Please select the correct answer.");
+      if (new Set(options.map((o) => o.toLowerCase())).size !== 4) {
+        setMessage("All four options must be different.");
         return;
       }
 
-      if (new Set(options).size !== 4) {
-        setMessage("All four options must be different.");
+      if (!options.includes(correctAnswer)) {
+        setMessage("Please select the correct answer.");
         return;
       }
     }
 
     if (
       form.question_type === "true_false" &&
-      !["True", "False"].includes(form.correct_answer)
+      !["True", "False"].includes(correctAnswer)
     ) {
       setMessage("Please select True or False.");
       return;
@@ -151,11 +191,8 @@ function QuestionBank() {
       section: form.question_type === "true_false" ? "A" : "B",
       question_type: form.question_type,
       question_text: questionText,
-      options:
-        form.question_type === "mcq"
-          ? form.options.map((option) => option.trim())
-          : null,
-      correct_answer: form.correct_answer,
+      options,
+      correct_answer: correctAnswer,
       topic,
       difficulty: form.difficulty,
       explanation: explanation || null,
@@ -177,19 +214,19 @@ function QuestionBank() {
       } else {
         result = await supabase
           .from("quiz_questions")
-          .insert(payload)
+          .insert({
+            ...payload,
+            review_status: "approved",
+            ai_generated: false,
+          })
           .select("id")
           .single();
       }
 
-      if (result.error) {
-        throw result.error;
-      }
+      if (result.error) throw result.error;
 
       if (!result.data?.id) {
-        throw new Error(
-          "No question was updated. Please check your admin permissions and database policies."
-        );
+        throw new Error("No question was saved. Check admin permissions.");
       }
 
       setMessage(
@@ -225,6 +262,7 @@ function QuestionBank() {
 
       if (error) throw error;
 
+      setSelectedQuestion(null);
       await loadQuestions();
     } catch (err) {
       setError(err.message || "Unable to delete question.");
@@ -234,9 +272,32 @@ function QuestionBank() {
   const filteredQuestions = questions.filter((question) => {
     const term = search.toLowerCase();
 
-    return (
+    const matchesSearch =
       (question.question_text || "").toLowerCase().includes(term) ||
-      (question.topic || "").toLowerCase().includes(term)
+      (question.topic || "").toLowerCase().includes(term) ||
+      (question.source_question || "").toLowerCase().includes(term);
+
+    const matchesType =
+      typeFilter === "all" || question.question_type === typeFilter;
+
+    const matchesDifficulty =
+      difficultyFilter === "all" ||
+      question.difficulty === difficultyFilter;
+
+    const matchesTopic =
+      topicFilter === "all" || question.topic === topicFilter;
+
+    const matchesSource =
+      sourceFilter === "all" ||
+      (sourceFilter === "ai" && question.ai_generated) ||
+      (sourceFilter === "manual" && !question.ai_generated);
+
+    return (
+      matchesSearch &&
+      matchesType &&
+      matchesDifficulty &&
+      matchesTopic &&
+      matchesSource
     );
   });
 
@@ -244,10 +305,7 @@ function QuestionBank() {
     <main className="qb-page">
       <div className="qb-container">
 
-        <button
-          className="qb-back"
-          onClick={() => navigate("/admin")}
-        >
+        <button className="qb-back" onClick={() => navigate("/admin")}>
           <ArrowLeft size={18} />
           Back to Admin Dashboard
         </button>
@@ -256,7 +314,7 @@ function QuestionBank() {
           <div>
             <span>ADMINISTRATION</span>
             <h1>QUESTION BANK</h1>
-            <p>Manage Islamic Quiz questions.</p>
+            <p>Manage approved Islamic Quiz questions.</p>
           </div>
 
           <div className="qb-head-actions">
@@ -268,6 +326,14 @@ function QuestionBank() {
               Import PDF
             </button>
 
+            <button
+              className="qb-review-link"
+              onClick={() => navigate("/admin/question-review")}
+            >
+              <Sparkles size={18} />
+              AI Review
+            </button>
+
             <button className="qb-add" onClick={openNewForm}>
               <Plus size={18} />
               Add Question
@@ -275,44 +341,46 @@ function QuestionBank() {
           </div>
         </header>
 
-        <div className="qb-stats">
-          <BookOpen size={28} />
-          <div>
-            <p>TOTAL QUESTIONS</p>
-            <h2>{questions.length}</h2>
+        <section className="qb-stats-grid">
+          <div className="qb-stats">
+            <BookOpen size={27} />
+            <div><p>TOTAL APPROVED</p><h2>{stats.total}</h2></div>
           </div>
-        </div>
+          <div className="qb-stats">
+            <BookOpen size={27} />
+            <div><p>TRUE / FALSE</p><h2>{stats.trueFalse}</h2></div>
+          </div>
+          <div className="qb-stats">
+            <BookOpen size={27} />
+            <div><p>MCQ QUESTIONS</p><h2>{stats.mcq}</h2></div>
+          </div>
+          <div className="qb-stats">
+            <Sparkles size={27} />
+            <div><p>AI GENERATED</p><h2>{stats.ai}</h2></div>
+          </div>
+        </section>
 
         {showForm && (
           <section className="qb-form-card">
-
             <div className="qb-form-heading">
               <h2>{editingId ? "EDIT QUESTION" : "ADD NEW QUESTION"}</h2>
-
               <button
                 type="button"
-                onClick={() => {
-                  setShowForm(false);
-                  setMessage("");
-                }}
+                onClick={() => setShowForm(false)}
+                aria-label="Close form"
               >
                 <X size={20} />
               </button>
             </div>
 
             <form onSubmit={handleSave}>
-
               <label>Question Type</label>
               <select
                 value={form.question_type}
                 onChange={(e) => changeType(e.target.value)}
               >
-                <option value="true_false">
-                  True / False — Section A
-                </option>
-                <option value="mcq">
-                  Multiple Choice — Section B
-                </option>
+                <option value="true_false">True / False — Section A</option>
+                <option value="mcq">Multiple Choice — Section B</option>
               </select>
 
               <label>Question</label>
@@ -329,14 +397,11 @@ function QuestionBank() {
               {form.question_type === "mcq" && (
                 <>
                   <label>Four Options</label>
-
                   {form.options.map((option, index) => (
                     <input
                       key={index}
                       value={option}
-                      onChange={(e) =>
-                        updateOption(index, e.target.value)
-                      }
+                      onChange={(e) => updateOption(index, e.target.value)}
                       placeholder={`Option ${index + 1}`}
                       required
                     />
@@ -346,15 +411,11 @@ function QuestionBank() {
                   <select
                     value={form.correct_answer}
                     onChange={(e) =>
-                      setForm({
-                        ...form,
-                        correct_answer: e.target.value,
-                      })
+                      setForm({ ...form, correct_answer: e.target.value })
                     }
                     required
                   >
                     <option value="">Select correct option</option>
-
                     {form.options.map((option, index) => (
                       <option
                         key={index}
@@ -374,10 +435,7 @@ function QuestionBank() {
                   <select
                     value={form.correct_answer}
                     onChange={(e) =>
-                      setForm({
-                        ...form,
-                        correct_answer: e.target.value,
-                      })
+                      setForm({ ...form, correct_answer: e.target.value })
                     }
                   >
                     <option value="True">True</option>
@@ -403,17 +461,8 @@ function QuestionBank() {
                   setForm({ ...form, difficulty: e.target.value })
                 }
               >
-                {[
-                  "Foundation",
-                  "Beginner",
-                  "Intermediate",
-                  "Moderate",
-                  "Advanced",
-                  "Expert",
-                ].map((level) => (
-                  <option key={level} value={level}>
-                    {level}
-                  </option>
+                {difficulties.map((level) => (
+                  <option key={level} value={level}>{level}</option>
                 ))}
               </select>
 
@@ -427,71 +476,100 @@ function QuestionBank() {
                 placeholder="Enter explanation..."
               />
 
-              {message && (
-                <p className="qb-message" role="alert">
-                  {message}
-                </p>
-              )}
+              {message && <p className="qb-message">{message}</p>}
 
-              <button
-                className="qb-save"
-                type="submit"
-                disabled={saving}
-              >
+              <button className="qb-save" type="submit" disabled={saving}>
                 <Save size={17} />
                 {saving ? "Saving..." : "Save Question"}
               </button>
-
             </form>
           </section>
         )}
 
-        <div className="qb-search">
-          <Search size={19} />
+        <section className="qb-filter-panel">
+          <div className="qb-search">
+            <Search size={19} />
+            <input
+              value={search}
+              onChange={(e) => setSearch(e.target.value)}
+              placeholder="Search questions, topics or source..."
+            />
+            <button onClick={loadQuestions} disabled={loading}>
+              <RefreshCw size={17} />
+            </button>
+          </div>
 
-          <input
-            value={search}
-            onChange={(e) => setSearch(e.target.value)}
-            placeholder="Search questions or topics..."
-          />
+          <div className="qb-filters">
+            <label><Filter size={15} /> Filters</label>
 
-          <button onClick={loadQuestions} disabled={loading}>
-            <RefreshCw size={17} />
-          </button>
-        </div>
+            <select value={typeFilter} onChange={(e) => setTypeFilter(e.target.value)}>
+              <option value="all">All Types</option>
+              <option value="true_false">True / False</option>
+              <option value="mcq">MCQ</option>
+            </select>
+
+            <select
+              value={difficultyFilter}
+              onChange={(e) => setDifficultyFilter(e.target.value)}
+            >
+              <option value="all">All Difficulties</option>
+              {difficulties.map((level) => (
+                <option key={level} value={level}>{level}</option>
+              ))}
+            </select>
+
+            <select value={topicFilter} onChange={(e) => setTopicFilter(e.target.value)}>
+              <option value="all">All Topics</option>
+              {topics.map((topic) => (
+                <option key={topic} value={topic}>{topic}</option>
+              ))}
+            </select>
+
+            <select value={sourceFilter} onChange={(e) => setSourceFilter(e.target.value)}>
+              <option value="all">All Sources</option>
+              <option value="ai">AI Generated</option>
+              <option value="manual">Manual Entry</option>
+            </select>
+          </div>
+        </section>
 
         {error && <p className="qb-error">{error}</p>}
+
+        <p className="qb-result-count">
+          Showing {filteredQuestions.length} of {questions.length} approved questions
+        </p>
 
         {loading ? (
           <p className="qb-empty">Loading questions...</p>
         ) : filteredQuestions.length === 0 ? (
-          <p className="qb-empty">
-            No questions found. Add your first question.
-          </p>
+          <p className="qb-empty">No approved questions found.</p>
         ) : (
           <section className="qb-list">
             {filteredQuestions.map((question, index) => (
               <article className="qb-question-card" key={question.id}>
-
                 <div className="qb-question-top">
                   <span>QUESTION {index + 1}</span>
-                  <span>
-                    {question.question_type === "mcq"
-                      ? "MCQ"
-                      : "TRUE / FALSE"}
-                  </span>
+                  <span>{question.question_type === "mcq" ? "MCQ" : "TRUE / FALSE"}</span>
+                  <span>{question.difficulty}</span>
+                  <span>{question.ai_generated ? "AI GENERATED" : "MANUAL"}</span>
                 </div>
 
                 <h3>{question.question_text}</h3>
 
-                <p>
-                  Topic: {question.topic} · {question.difficulty}
+                <p className="qb-meta">
+                  Topic: {question.topic} · Section {question.section}
                 </p>
 
                 {question.question_type === "mcq" && (
-                  <ol className="qb-options">
+                  <ol className="qb-options" type="A">
                     {(question.options || []).map((option, i) => (
-                      <li key={i}>{option}</li>
+                      <li
+                        key={i}
+                        className={option === question.correct_answer ? "qb-correct-option" : ""}
+                      >
+                        {option}
+                        {option === question.correct_answer && " ✓"}
+                      </li>
                     ))}
                   </ol>
                 )}
@@ -500,21 +578,66 @@ function QuestionBank() {
                   Correct Answer: {question.correct_answer}
                 </p>
 
-                <div className="qb-actions">
-                  <button onClick={() => openEditForm(question)}>
-                    <Pencil size={16} />
-                    Edit
-                  </button>
+                {question.source_batch_id && (
+                  <div className="qb-source-info">
+                    <strong>PDF IMPORTED QUESTION</strong>
+                    <p>Source page: {question.source_page || "Not identified"}</p>
+                    {question.source_question && (
+                      <details>
+                        <summary>View original source Q&A</summary>
+                        <p>{question.source_question}</p>
+                      </details>
+                    )}
+                  </div>
+                )}
 
+                {question.explanation && (
+                  <p className="qb-explanation">
+                    <strong>Explanation:</strong> {question.explanation}
+                  </p>
+                )}
+
+                <div className="qb-actions">
+                  <button onClick={() => setSelectedQuestion(question)}>
+                    <Eye size={16} /> Preview
+                  </button>
+                  <button onClick={() => openEditForm(question)}>
+                    <Pencil size={16} /> Edit
+                  </button>
                   <button onClick={() => deleteQuestion(question.id)}>
-                    <Trash2 size={16} />
-                    Delete
+                    <Trash2 size={16} /> Delete
                   </button>
                 </div>
-
               </article>
             ))}
           </section>
+        )}
+
+        {selectedQuestion && (
+          <div className="qb-modal-backdrop" onClick={() => setSelectedQuestion(null)}>
+            <div className="qb-preview-modal" onClick={(e) => e.stopPropagation()}>
+              <div className="qb-form-heading">
+                <h2>QUESTION PREVIEW</h2>
+                <button onClick={() => setSelectedQuestion(null)}>
+                  <X size={20} />
+                </button>
+              </div>
+              <h3>{selectedQuestion.question_text}</h3>
+              <p>Topic: {selectedQuestion.topic}</p>
+              <p>Difficulty: {selectedQuestion.difficulty}</p>
+              <p>Correct Answer: <strong>{selectedQuestion.correct_answer}</strong></p>
+              {selectedQuestion.explanation && <p>{selectedQuestion.explanation}</p>}
+              {selectedQuestion.source_question && (
+                <div className="qb-source-info">
+                  <strong>Original source Q&A</strong>
+                  <p>{selectedQuestion.source_question}</p>
+                </div>
+              )}
+              <button className="qb-save" onClick={() => setSelectedQuestion(null)}>
+                Close Preview
+              </button>
+            </div>
+          </div>
         )}
 
       </div>

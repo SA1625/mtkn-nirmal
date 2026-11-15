@@ -1,0 +1,34 @@
+
+.am-page{min-height:100vh;background:#f4f7f5;padding:30px 18px;color:#173d32}
+.am-container{max-width:1150px;margin:auto}
+.am-back{display:flex;align-items:center;gap:8px;border:0;background:transparent;color:#176b50;font-weight:700;cursor:pointer;margin-bottom:24px}
+.am-header{display:flex;align-items:center;gap:16px;margin-bottom:26px}
+.am-heading-icon{width:58px;height:58px;border-radius:16px;background:#dceee5;display:grid;place-items:center;color:#176b50}
+.am-header h1{font-size:25px;margin:0;font-weight:850}
+.am-header p{color:#718078;margin:6px 0 0}
+.am-stats{display:grid;grid-template-columns:repeat(3,1fr);gap:16px;margin-bottom:22px}
+.am-stats div{background:white;border:1px solid #e1eae4;border-radius:15px;padding:20px;display:grid;gap:8px}
+.am-stats svg{color:#197354}
+.am-stats span{font-size:13px;color:#78877e}
+.am-stats strong{font-size:26px}
+.am-message{background:#e4f4e9;color:#176b50;padding:13px 16px;border-radius:10px;margin-bottom:16px}
+.am-toolbar{display:flex;justify-content:space-between;gap:12px;margin-bottom:16px}
+.am-search{display:flex;align-items:center;gap:10px;background:white;border:1px solid #dce6df;border-radius:10px;padding:0 13px;flex:1;max-width:500px}
+.am-search input{width:100%;border:0;outline:0;padding:13px 0;background:transparent}
+.am-toolbar button{display:flex;align-items:center;gap:8px;background:#176b50;color:white;border:0;border-radius:10px;padding:11px 16px;cursor:pointer}
+.am-table-wrap{background:white;border:1px solid #e1eae4;border-radius:14px;overflow:auto}
+.am-table{width:100%;border-collapse:collapse;min-width:760px}
+.am-table th,.am-table td{text-align:left;padding:16px;border-bottom:1px solid #edf1ee}
+.am-table th{font-size:12px;color:#748179;background:#f8faf8}
+.am-table td strong,.am-table td small{display:block}
+.am-table td small{color:#87928b;margin-top:5px}
+.am-role{display:inline-block;padding:6px 10px;border-radius:20px;font-size:11px;font-weight:800;background:#edf1ee;color:#526158}
+.am-role.admin{background:#e4efff;color:#245da0}
+.am-role.super_admin{background:#f8edd2;color:#95630c}
+.am-promote,.am-demote{border:0;border-radius:8px;padding:9px 12px;font-weight:700;cursor:pointer}
+.am-promote{background:#176b50;color:white}
+.am-demote{background:#fff0ed;color:#b13d30}
+.am-promote:disabled,.am-demote:disabled{opacity:.5;cursor:wait}
+.am-protected{font-size:12px;color:#98701d;font-weight:700}
+.am-empty{text-align:center;padding:30px;color:#78877e}
+@media(max-width:650px){.am-stats{grid-template-columns:1fr}.am-header h1{font-size:20px}.am-toolbar{flex-direction:column}.am-search{max-width:none;min-height:44px}}

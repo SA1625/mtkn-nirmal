@@ -1,0 +1,23 @@
+
+.ps-page{min-height:100vh;background:#f4f7f5;padding:30px 18px;color:#173d32}
+.ps-container{max-width:1000px;margin:auto}
+.ps-back{display:flex;align-items:center;gap:8px;border:0;background:transparent;color:#176b50;font-weight:700;cursor:pointer;margin-bottom:24px}
+.ps-header{display:flex;align-items:center;gap:16px;margin-bottom:25px}
+.ps-icon{width:58px;height:58px;border-radius:16px;background:#dceee5;color:#176b50;display:grid;place-items:center}
+.ps-header h1{font-size:25px;margin:0;font-weight:850}
+.ps-header p,.ps-description{color:#78877e;margin:6px 0 0}
+.ps-message{padding:13px 16px;border-radius:10px;background:#e4f4e9;color:#176b50;margin-bottom:18px}
+.ps-card{background:white;border:1px solid #e1eae4;border-radius:16px;padding:24px;margin-bottom:18px}
+.ps-card h2{font-size:19px;margin:0}
+.ps-card-heading{display:flex;justify-content:space-between;align-items:center;gap:12px;margin-bottom:22px}
+.ps-card-heading p{color:#78877e;margin:6px 0 0;font-size:13px}
+.ps-fixed{font-size:11px;font-weight:800;color:#176b50;background:#e4f4e9;padding:7px 10px;border-radius:20px}
+.ps-grid{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:18px;margin-top:20px}
+.ps-grid label{display:grid;gap:8px;font-size:13px;font-weight:700;color:#506258}
+.ps-grid input{width:100%;box-sizing:border-box;border:1px solid #dce6df;border-radius:9px;padding:12px;font-size:14px;color:#173d32;background:#fff}
+.ps-grid input:disabled{background:#f3f6f3;color:#68766e}
+.ps-actions{display:flex;justify-content:space-between;align-items:center;gap:15px;color:#78877e;font-size:13px}
+.ps-actions button{display:flex;align-items:center;gap:9px;background:#176b50;color:white;border:0;border-radius:10px;padding:13px 20px;font-weight:700;cursor:pointer}
+.ps-actions button:disabled{opacity:.6;cursor:wait}
+.ps-loading{padding:50px;text-align:center;color:#176b50}
+@media(max-width:600px){.ps-grid{grid-template-columns:1fr}.ps-card{padding:18px}.ps-header h1{font-size:20px}.ps-card-heading{align-items:flex-start;flex-direction:column}.ps-actions{align-items:flex-start;flex-direction:column}}

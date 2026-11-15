@@ -1,0 +1,228 @@
+
+.admin-results-page {
+  min-height: 70vh;
+  padding: 28px 4%;
+  background: #f5f8f6;
+  color: #173d32;
+}
+
+.admin-results-container {
+  max-width: 1300px;
+  margin: auto;
+}
+
+.admin-results-back {
+  display: flex;
+  gap: 8px;
+  align-items: center;
+  border: 0;
+  background: transparent;
+  color: #075b43;
+  font-weight: 700;
+  cursor: pointer;
+  margin-bottom: 22px;
+}
+
+.admin-results-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  gap: 15px;
+  margin-bottom: 25px;
+}
+
+.admin-results-header span {
+  color: #a18140;
+  font-size: 11px;
+  font-weight: 800;
+  letter-spacing: 2px;
+}
+
+.admin-results-header h1 {
+  font-size: 26px;
+  margin: 7px 0;
+}
+
+.admin-results-header p {
+  color: #78857e;
+}
+
+.admin-results-header button {
+  display: flex;
+  gap: 8px;
+  align-items: center;
+  padding: 11px 15px;
+  border: 1px solid #075b43;
+  border-radius: 8px;
+  background: white;
+  color: #075b43;
+  cursor: pointer;
+}
+
+.admin-results-stats {
+  display: grid;
+  grid-template-columns: repeat(4, 1fr);
+  gap: 14px;
+  margin-bottom: 25px;
+}
+
+.admin-results-stats article {
+  display: grid;
+  gap: 9px;
+  padding: 19px;
+  background: white;
+  border: 1px solid #e2ebe5;
+  border-radius: 11px;
+}
+
+.admin-results-stats svg {
+  color: #16834a;
+}
+
+.admin-results-stats span {
+  color: #78857e;
+  font-size: 12px;
+}
+
+.admin-results-stats strong {
+  color: #075b43;
+  font-size: 25px;
+}
+
+.admin-results-panel {
+  padding: 22px;
+  margin: 22px 0;
+  background: white;
+  border: 1px solid #e2ebe5;
+  border-radius: 12px;
+}
+
+.admin-results-panel h2 {
+  font-size: 18px;
+  margin: 0 0 18px;
+}
+
+.admin-results-filters {
+  display: flex;
+  gap: 12px;
+  margin-bottom: 18px;
+}
+
+.admin-results-search {
+  display: flex;
+  align-items: center;
+  flex: 1;
+  gap: 8px;
+  padding: 0 12px;
+  border: 1px solid #dce5df;
+  border-radius: 8px;
+}
+
+.admin-results-search input {
+  width: 100%;
+  min-width: 0;
+  padding: 12px 0;
+  border: 0;
+  outline: 0;
+}
+
+.admin-results-filters select {
+  min-width: 200px;
+  padding: 11px;
+  border: 1px solid #dce5df;
+  border-radius: 8px;
+  background: white;
+}
+
+.admin-results-table-wrap {
+  width: 100%;
+  overflow-x: auto;
+}
+
+.admin-results-table {
+  width: 100%;
+  border-collapse: collapse;
+  text-align: left;
+  font-size: 13px;
+}
+
+.admin-results-table th {
+  background: #edf5ef;
+  color: #315448;
+  padding: 13px;
+  white-space: nowrap;
+}
+
+.admin-results-table td {
+  padding: 13px;
+  border-bottom: 1px solid #edf0ed;
+  color: #46584e;
+}
+
+.admin-results-table td strong {
+  color: #075b43;
+}
+
+.admin-results-table td small {
+  display: block;
+  color: #87918b;
+  margin-top: 4px;
+}
+
+.admin-results-empty {
+  padding: 20px;
+  text-align: center;
+  color: #78857e;
+}
+
+.admin-results-error {
+  display: flex;
+  gap: 9px;
+  padding: 13px;
+  background: #fff0ee;
+  color: #a13d32;
+  border-radius: 8px;
+  margin-bottom: 18px;
+  overflow-wrap: anywhere;
+}
+
+@media (max-width: 800px) {
+  .admin-results-stats {
+    grid-template-columns: repeat(2, 1fr);
+  }
+
+  .admin-results-filters {
+    flex-direction: column;
+  }
+
+  .admin-results-filters select {
+    width: 100%;
+  }
+}
+
+@media (max-width: 500px) {
+  .admin-results-page {
+    padding: 18px 12px;
+  }
+
+  .admin-results-header {
+    align-items: flex-start;
+    flex-direction: column;
+  }
+
+  .admin-results-stats article {
+    padding: 13px;
+  }
+
+  .admin-results-panel {
+    padding: 13px;
+  }
+}
+
+.admin-results-panel-heading{display:flex;align-items:center;justify-content:space-between;gap:14px;flex-wrap:wrap;margin-bottom:18px}
+.admin-results-panel-heading h2{margin:0}
+.admin-results-export{display:inline-flex;align-items:center;justify-content:center;gap:8px;padding:10px 14px;background:#176b50;color:white;border:0;border-radius:9px;font-weight:700;cursor:pointer}
+.admin-results-export:hover{background:#10543e}
+.admin-results-export:disabled{opacity:.5;cursor:not-allowed}
+.admin-results-table td small{display:block;margin-top:4px;color:#78877e}
+@media(max-width:650px){.admin-results-panel-heading{align-items:flex-start;flex-direction:column}.admin-results-export{width:100%}}
