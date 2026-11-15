@@ -1,14 +1,29 @@
 
-import React, { useCallback, useEffect, useMemo, useState } from "react";
+import React, {
+  useCallback,
+  useEffect,
+  useMemo,
+  useState
+} from "react";
 import "./Dashboard.css";
 import {
   CalendarDays, ClipboardList, Trophy, FileText,
   ChartNoAxesColumn, UserRound, LogOut, Clock,
   RefreshCw, Play, CheckCircle, AlertTriangle,
-  Medal, TrendingUp, Download
+  Medal, TrendingUp, Download, Lock, Award,
+  ShieldCheck
 } from "lucide-react";
 import { supabase } from "./supabase";
 import { useNavigate } from "react-router-dom";
+
+const LEVELS = [
+  "Foundation",
+  "Beginner",
+  "Intermediate",
+  "Moderate",
+  "Advanced",
+  "Expert"
+];
 
 const escapeHTML = (value) =>
   String(value ?? "").replace(/[&<>"']/g, (char) => ({
@@ -22,7 +37,7 @@ const escapeHTML = (value) =>
 function printResultReport(result, exam, candidateName) {
   const examName = exam?.exam_name || "Islamic Quiz Examination";
   const date = result.published_at
-    ? new Date(result.published_at).toLocaleString()
+    ? new Date(result.published_at).toLocaleString("en-IN")
     : "—";
 
   const popup = window.open("", "_blank", "width=900,height=750");
@@ -147,7 +162,18 @@ function Dashboard() {
           .single(),
 
         supabase.from("exams")
-          .select("id, exam_name, exam_date, availability_end, duration_minutes, total_questions")
+          .select(`
+            id,
+            exam_name,
+            exam_date,
+            availability_end,
+            duration_minutes,
+            total_questions,
+            status,
+            series_id,
+            level_order,
+            level_name
+          `)
           .eq("status", "published")
           .order("exam_date", { ascending: true }),
 
@@ -190,7 +216,9 @@ function Dashboard() {
   const now = Date.now();
 
   const upcomingExams = useMemo(
-    () => exams.filter((exam) => new Date(exam.exam_date).getTime() > now),
+    () => exams.filter((exam) =>
+      new Date(exam.exam_date).getTime() > now
+    ),
     [exams, now]
   );
 
@@ -207,7 +235,9 @@ function Dashboard() {
     () => new Set([
       ...results.map((result) => result.exam_id),
       ...attempts
-        .filter((attempt) => ["submitted", "terminated"].includes(attempt.status))
+        .filter((attempt) =>
+          ["submitted", "terminated"].includes(attempt.status)
+        )
         .map((attempt) => attempt.exam_id)
     ]),
     [results, attempts]
@@ -220,13 +250,17 @@ function Dashboard() {
 
   const averageScore = results.length
     ? Math.round(
-        results.reduce((sum, result) => sum + Number(result.marks_obtained || 0), 0) /
-        results.length
+        results.reduce(
+          (sum, result) => sum + Number(result.marks_obtained || 0),
+          0
+        ) / results.length
       )
     : 0;
 
   const bestScore = results.length
-    ? Math.max(...results.map((result) => Number(result.marks_obtained || 0)))
+    ? Math.max(...results.map((result) =>
+        Number(result.marks_obtained || 0)
+      ))
     : 0;
 
   const handleLogout = async () => {
@@ -268,13 +302,134 @@ function Dashboard() {
     return (exam?.exam_name || "").toLowerCase().includes(historyFilter);
   });
 
+  // Six-level series progression
+  const seriesGroups = useMemo(() => {
+    const groups = new Map();
+
+    exams.forEach((exam) => {
+      if (!exam.series_id) return;
+
+      if (!groups.has(exam.series_id)) {
+        groups.set(exam.series_id, []);
+      }
+
+      groups.get(exam.series_id).push(exam);
+    });
+
+    return [...groups.entries()].map(([seriesId, seriesExams]) => ({
+      seriesId,
+      exams: seriesExams.sort(
+        (a, b) => Number(a.level_order) - Number(b.level_order)
+      )
+    }));
+  }, [exams]);
+
+  const getLevelState = (exam) => {
+    const attempt = getAttempt(exam.id);
+    const result = getResult(exam.id);
+
+    if (attempt?.status === "terminated") {
+      return { key: "terminated", label: "Terminated" };
+    }
+
+    if (attempt?.status === "submitted" || result) {
+      return { key: "completed", label: "Completed" };
+    }
+
+    if (attempt?.status === "in_progress") {
+      return { key: "in_progress", label: "In Progress" };
+    }
+
+    const previousLevel = seriesGroups
+      .flatMap((group) => group.exams)
+      .find((item) =>
+        item.series_id === exam.series_id &&
+        Number(item.level_order) === Number(exam.level_order) - 1
+      );
+
+    if (Number(exam.level_order) > 1) {
+      if (!previousLevel) {
+        return { key: "locked", label: "Locked" };
+      }
+
+      const previousAttempt = getAttempt(previousLevel.id);
+
+      if (previousAttempt?.status !== "submitted") {
+        return { key: "locked", label: "Locked" };
+      }
+    }
+
+    const start = new Date(exam.exam_date).getTime();
+    const end = new Date(exam.availability_end).getTime();
+
+    if (start > now) {
+      return { key: "upcoming", label: "Upcoming" };
+    }
+
+    if (end < now) {
+      return { key: "closed", label: "Closed" };
+    }
+
+    return { key: "available", label: "Available" };
+  };
+
+  const allLevelResults = (seriesExams) =>
+    seriesExams.map((exam) => ({
+      exam,
+      result: getResult(exam.id),
+      attempt: getAttempt(exam.id),
+      state: getLevelState(exam)
+    }));
+
+  const totalSeriesMarks = (seriesExams) =>
+    seriesExams.reduce((sum, exam) => {
+      const result = getResult(exam.id);
+      return sum + Number(result?.marks_obtained || 0);
+    }, 0);
+
+  const totalCompletedLevels = (seriesExams) =>
+    seriesExams.filter((exam) => {
+      const attempt = getAttempt(exam.id);
+      return attempt?.status === "submitted" || Boolean(getResult(exam.id));
+    }).length;
+
   const cards = [
-    { title: "Upcoming Examinations", count: upcomingExams.length, icon: CalendarDays, target: "upcoming-exams" },
-    { title: "Available Mock Tests", count: availableExams.length, icon: ClipboardList, target: "available-exams" },
-    { title: "Completed Examinations", count: completedExams.length, icon: FileText, target: "completed-exams" },
-    { title: "My Results", count: results.length, icon: CheckCircle, target: "my-results" },
-    { title: "Performance Analytics", count: `${averageScore}%`, icon: ChartNoAxesColumn, target: "performance" },
-    { title: "Leaderboard", count: leaderboard.length, icon: Trophy, target: "leaderboard" }
+    {
+      title: "Upcoming Examinations",
+      count: upcomingExams.length,
+      icon: CalendarDays,
+      target: "upcoming-exams"
+    },
+    {
+      title: "Available Mock Tests",
+      count: availableExams.length,
+      icon: ClipboardList,
+      target: "available-exams"
+    },
+    {
+      title: "Completed Examinations",
+      count: completedExams.length,
+      icon: FileText,
+      target: "completed-exams"
+    },
+    {
+      title: "My Results",
+      count: results.length,
+      icon: CheckCircle,
+      target: "my-results"
+    },
+    {
+      title: "Performance Analytics",
+      count: `${averageScore}%`,
+      icon: ChartNoAxesColumn,
+      target: "performance"
+    },
+    {
+      title: "Leaderboard",
+      count: leaderboard.length,
+      icon: Trophy,
+      target: "leaderboard"
+    }
   ];
 
   if (loading) {
@@ -288,6 +443,7 @@ function Dashboard() {
   return (
     <section className="dashboard-section">
       <div className="dashboard-container">
+
         <div className="dashboard-heading">
           <div>
             <span className="dashboard-eyebrow">CANDIDATE PORTAL</span>
@@ -297,9 +453,14 @@ function Dashboard() {
           </div>
 
           <div className="dashboard-heading-actions">
-            <button onClick={loadDashboard} className="dashboard-refresh" disabled={loading}>
+            <button
+              onClick={loadDashboard}
+              className="dashboard-refresh"
+              disabled={loading}
+            >
               <RefreshCw size={17} /> Refresh
             </button>
+
             <button onClick={handleLogout} className="logout-button">
               <LogOut size={18} /> Logout
             </button>
@@ -312,12 +473,279 @@ function Dashboard() {
           </div>
         )}
 
+        {/* SIX LEVEL PROGRESSION */}
+        <section className="dashboard-content-section" id="six-level-progress">
+          <div className="dashboard-section-heading">
+            <div>
+              <h2><Award size={22} /> Six-Level Quiz Progress</h2>
+              <p>Complete each level in order, from Foundation to Expert.</p>
+            </div>
+          </div>
+
+          {seriesGroups.length === 0 ? (
+            <div className="dashboard-empty">
+              Six-level examinations will appear here once the exam series is published.
+            </div>
+          ) : (
+            seriesGroups.map(({ seriesId, exams: seriesExams }) => {
+              const completed = totalCompletedLevels(seriesExams);
+              const marks = totalSeriesMarks(seriesExams);
+              const percentage = Math.round((marks / 600) * 10000) / 100;
+              const levels = allLevelResults(seriesExams);
+              const allCompleted = completed === 6;
+
+              return (
+                <article
+                  key={seriesId}
+                  style={{
+                    background: "#fff",
+                    border: "1px solid #dce9e1",
+                    borderRadius: 14,
+                    padding: 20,
+                    marginBottom: 20
+                  }}
+                >
+                  <div style={{
+                    display: "flex",
+                    justifyContent: "space-between",
+                    alignItems: "center",
+                    flexWrap: "wrap",
+                    gap: 12
+                  }}>
+                    <div>
+                      <h3 style={{ margin: "0 0 5px" }}>
+                        ISLAMIC QUIZ 2026 — SIX LEVELS
+                      </h3>
+                      <p style={{ margin: 0, color: "#718078", fontSize: 13 }}>
+                        {completed} of 6 levels completed
+                      </p>
+                    </div>
+
+                    <span style={{
+                      color: allCompleted ? "#08734e" : "#8b6b20",
+                      background: allCompleted ? "#e6f4eb" : "#fff5d9",
+                      borderRadius: 20,
+                      padding: "7px 12px",
+                      fontSize: 12,
+                      fontWeight: 700
+                    }}>
+                      {allCompleted ? "ALL LEVELS COMPLETED" : "IN PROGRESS"}
+                    </span>
+                  </div>
+
+                  <div style={{
+                    height: 10,
+                    borderRadius: 20,
+                    background: "#e8eee9",
+                    overflow: "hidden",
+                    margin: "18px 0"
+                  }}>
+                    <div style={{
+                      height: "100%",
+                      width: `${(completed / 6) * 100}%`,
+                      background: "#08734e",
+                      borderRadius: 20,
+                      transition: "width .3s"
+                    }} />
+                  </div>
+
+                  <div style={{
+                    display: "grid",
+                    gridTemplateColumns: "repeat(auto-fit,minmax(145px,1fr))",
+                    gap: 12
+                  }}>
+                    {levels.map(({ exam, result, attempt, state }) => {
+                      const levelName =
+                        exam.level_name ||
+                        LEVELS[Number(exam.level_order) - 1] ||
+                        exam.exam_name;
+
+                      const color =
+                        state.key === "completed" ? "#08734e" :
+                        state.key === "available" ? "#1764a0" :
+                        state.key === "terminated" ? "#b42318" :
+                        "#78847d";
+
+                      const Icon =
+                        state.key === "completed" ? CheckCircle :
+                        state.key === "available" ? Play :
+                        state.key === "terminated" ? AlertTriangle :
+                        Lock;
+
+                      return (
+                        <div
+                          key={exam.id}
+                          style={{
+                            border: `1px solid ${color}44`,
+                            borderRadius: 10,
+                            padding: 13,
+                            background: `${color}08`
+                          }}
+                        >
+                          <div style={{
+                            display: "flex",
+                            justifyContent: "space-between",
+                            alignItems: "center",
+                            gap: 6
+                          }}>
+                            <strong style={{ fontSize: 13 }}>
+                              {Number(exam.level_order)}. {levelName}
+                            </strong>
+                            <Icon size={17} color={color} />
+                          </div>
+
+                          <div style={{
+                            color,
+                            fontWeight: 700,
+                            fontSize: 11,
+                            marginTop: 8
+                          }}>
+                            {state.label.toUpperCase()}
+                          </div>
+
+                          {result && (
+                            <div style={{
+                              marginTop: 8,
+                              fontSize: 13,
+                              fontWeight: 700
+                            }}>
+                              {result.marks_obtained}/100
+                            </div>
+                          )}
+
+                          {attempt?.status === "in_progress" && (
+                            <div style={{
+                              fontSize: 11,
+                              marginTop: 7,
+                              color: "#718078"
+                            }}>
+                              Attempt already started
+                            </div>
+                          )}
+
+                          {state.key === "available" && (
+                            <button
+                              type="button"
+                              onClick={() => startExam(exam)}
+                              style={{
+                                width: "100%",
+                                marginTop: 10,
+                                padding: "9px 8px",
+                                border: 0,
+                                borderRadius: 7,
+                                background: "#08734e",
+                                color: "#fff",
+                                fontWeight: 700,
+                                cursor: "pointer",
+                                fontSize: 12
+                              }}
+                            >
+                              Start Level
+                            </button>
+                          )}
+
+                          {state.key === "upcoming" && (
+                            <div style={{
+                              fontSize: 11,
+                              marginTop: 8,
+                              color: "#718078"
+                            }}>
+                              Opens: {new Date(exam.exam_date).toLocaleDateString("en-IN")}
+                            </div>
+                          )}
+
+                          {state.key === "terminated" && (
+                            <div style={{
+                              fontSize: 11,
+                              marginTop: 8,
+                              color: "#b42318"
+                            }}>
+                              This level cannot be restarted.
+                            </div>
+                          )}
+                        </div>
+                      );
+                    })}
+                  </div>
+
+                  <div style={{
+                    display: "grid",
+                    gridTemplateColumns: "repeat(auto-fit,minmax(150px,1fr))",
+                    gap: 12,
+                    marginTop: 20
+                  }}>
+                    <div style={{
+                      padding: 15,
+                      borderRadius: 9,
+                      background: "#edf5ef"
+                    }}>
+                      <span style={{ fontSize: 12, color: "#607268" }}>
+                        Overall Marks
+                      </span>
+                      <h2 style={{ margin: "5px 0", color: "#08734e" }}>
+                        {marks}/600
+                      </h2>
+                    </div>
+
+                    <div style={{
+                      padding: 15,
+                      borderRadius: 9,
+                      background: "#edf5ef"
+                    }}>
+                      <span style={{ fontSize: 12, color: "#607268" }}>
+                        Overall Percentage
+                      </span>
+                      <h2 style={{ margin: "5px 0", color: "#08734e" }}>
+                        {percentage}%
+                      </h2>
+                    </div>
+
+                    <div style={{
+                      padding: 15,
+                      borderRadius: 9,
+                      background: "#edf5ef"
+                    }}>
+                      <span style={{ fontSize: 12, color: "#607268" }}>
+                        Levels Completed
+                      </span>
+                      <h2 style={{ margin: "5px 0", color: "#08734e" }}>
+                        {completed}/6
+                      </h2>
+                    </div>
+                  </div>
+
+                  {allCompleted && (
+                    <div style={{
+                      marginTop: 16,
+                      padding: 14,
+                      borderRadius: 9,
+                      background: "#e6f4eb",
+                      color: "#08734e",
+                      fontWeight: 700
+                    }}>
+                      <ShieldCheck size={18} style={{
+                        verticalAlign: "middle",
+                        marginRight: 7
+                      }} />
+                      Congratulations! You have completed all six levels.
+                    </div>
+                  )}
+                </article>
+              );
+            })
+          )}
+        </section>
+
+        {/* DASHBOARD QUICK CARDS */}
         <div className="dashboard-grid">
           {cards.map((item) => {
             const Icon = item.icon;
             return (
-              <button className="dashboard-card" key={item.title}
-                onClick={() => scrollToSection(item.target)}>
+              <button
+                className="dashboard-card"
+                key={item.title}
+                onClick={() => scrollToSection(item.target)}
+              >
                 <Icon size={29} />
                 <h3>{item.title}</h3>
                 <strong>{item.count}</strong>
@@ -325,13 +753,17 @@ function Dashboard() {
             );
           })}
 
-          <button className="dashboard-card" onClick={() => navigate("/profile")}>
+          <button
+            className="dashboard-card"
+            onClick={() => navigate("/profile")}
+          >
             <UserRound size={29} />
             <h3>My Profile & Settings</h3>
             <span>View Profile</span>
           </button>
         </div>
 
+        {/* UPCOMING EXAMS */}
         <section className="dashboard-content-section" id="upcoming-exams">
           <div className="dashboard-section-heading">
             <div>
@@ -341,7 +773,9 @@ function Dashboard() {
           </div>
 
           {upcomingExams.length === 0 ? (
-            <div className="dashboard-empty">No upcoming examinations currently.</div>
+            <div className="dashboard-empty">
+              No upcoming examinations currently.
+            </div>
           ) : (
             <div className="dashboard-exam-list">
               {upcomingExams.map((exam) => (
@@ -349,8 +783,13 @@ function Dashboard() {
                   <div>
                     <span className="dashboard-status upcoming">UPCOMING</span>
                     <h3>{exam.exam_name}</h3>
-                    <p><CalendarDays size={15} /> {new Date(exam.exam_date).toLocaleString()}</p>
-                    <p><Clock size={15} /> {exam.duration_minutes} minutes · 100 questions</p>
+                    <p>
+                      <CalendarDays size={15} />{" "}
+                      {new Date(exam.exam_date).toLocaleString("en-IN")}
+                    </p>
+                    <p>
+                      <Clock size={15} /> {exam.duration_minutes} minutes · 100 questions
+                    </p>
                   </div>
                   <span className="dashboard-date-note">Not started yet</span>
                 </article>
@@ -359,6 +798,7 @@ function Dashboard() {
           )}
         </section>
 
+        {/* AVAILABLE EXAMS */}
         <section className="dashboard-content-section" id="available-exams">
           <div className="dashboard-section-heading">
             <div>
@@ -368,19 +808,28 @@ function Dashboard() {
           </div>
 
           {availableExams.length === 0 ? (
-            <div className="dashboard-empty">No examinations are available right now.</div>
+            <div className="dashboard-empty">
+              No examinations are available right now.
+            </div>
           ) : (
             <div className="dashboard-exam-list">
               {availableExams.map((exam) => {
                 const attempt = getAttempt(exam.id);
+                const state = exam.series_id ? getLevelState(exam) : null;
 
                 return (
                   <article className="dashboard-exam-card" key={exam.id}>
                     <div>
-                      <span className="dashboard-status available">AVAILABLE</span>
+                      <span className="dashboard-status available">
+                        AVAILABLE
+                      </span>
                       <h3>{exam.exam_name}</h3>
-                      <p><Clock size={15} /> Duration: {exam.duration_minutes} minutes</p>
-                      <p>Closes: {new Date(exam.availability_end).toLocaleString()}</p>
+                      <p>
+                        <Clock size={15} /> Duration: {exam.duration_minutes} minutes
+                      </p>
+                      <p>
+                        Closes: {new Date(exam.availability_end).toLocaleString("en-IN")}
+                      </p>
                     </div>
 
                     {attempt ? (
@@ -391,8 +840,15 @@ function Dashboard() {
                             ? "Attempt submitted"
                             : "Attempt already started"}
                       </span>
+                    ) : state && state.key !== "available" ? (
+                      <span className="dashboard-attempt-note">
+                        {state.label}
+                      </span>
                     ) : (
-                      <button className="dashboard-start-button" onClick={() => startExam(exam)}>
+                      <button
+                        className="dashboard-start-button"
+                        onClick={() => startExam(exam)}
+                      >
                         <Play size={16} /> Start Exam
                       </button>
                     )}
@@ -403,6 +859,7 @@ function Dashboard() {
           )}
         </section>
 
+        {/* COMPLETED EXAMS */}
         <section className="dashboard-content-section" id="completed-exams">
           <div className="dashboard-section-heading">
             <div>
@@ -412,7 +869,9 @@ function Dashboard() {
           </div>
 
           {completedExams.length === 0 ? (
-            <div className="dashboard-empty">You have no completed examinations yet.</div>
+            <div className="dashboard-empty">
+              You have no completed examinations yet.
+            </div>
           ) : (
             <div className="dashboard-exam-list">
               {completedExams.map((exam) => {
@@ -426,8 +885,16 @@ function Dashboard() {
                         {result ? "SUBMITTED" : "TERMINATED"}
                       </span>
                       <h3>{exam.exam_name}</h3>
-                      <p>{result ? `Score: ${result.marks_obtained}/100` : "No result available for terminated attempt."}</p>
-                      <p>{attempt?.submitted_at ? new Date(attempt.submitted_at).toLocaleString() : ""}</p>
+                      <p>
+                        {result
+                          ? `Score: ${result.marks_obtained}/100`
+                          : "No result available for terminated attempt."}
+                      </p>
+                      <p>
+                        {attempt?.submitted_at
+                          ? new Date(attempt.submitted_at).toLocaleString("en-IN")
+                          : ""}
+                      </p>
                     </div>
                   </article>
                 );
@@ -436,6 +903,7 @@ function Dashboard() {
           )}
         </section>
 
+        {/* RESULTS */}
         <section className="dashboard-content-section" id="my-results">
           <div className="dashboard-section-heading">
             <div>
@@ -473,7 +941,11 @@ function Dashboard() {
                   <article className="dashboard-result-card" key={result.id}>
                     <div>
                       <h3>{exam?.exam_name || "Islamic Quiz Examination"}</h3>
-                      <p>{result.published_at ? new Date(result.published_at).toLocaleString() : "—"}</p>
+                      <p>
+                        {result.published_at
+                          ? new Date(result.published_at).toLocaleString("en-IN")
+                          : "—"}
+                      </p>
                       <p>
                         {result.attempted_questions ?? 0} attempted ·{" "}
                         {result.correct_answers} correct · {result.wrong_answers} wrong
@@ -482,11 +954,15 @@ function Dashboard() {
 
                     <div className="dashboard-result-marks">
                       <strong>{result.marks_obtained}/100</strong>
-                      <span>{result.correct_answers} correct · {result.wrong_answers} wrong</span>
+                      <span>
+                        {result.correct_answers} correct · {result.wrong_answers} wrong
+                      </span>
                       <button
                         type="button"
                         className="dashboard-report-button"
-                        onClick={() => printResultReport(result, exam, candidateName)}
+                        onClick={() =>
+                          printResultReport(result, exam, candidateName)
+                        }
                       >
                         <Download size={16} /> Download Marksheet
                       </button>
@@ -498,6 +974,7 @@ function Dashboard() {
           )}
         </section>
 
+        {/* PERFORMANCE */}
         <section className="dashboard-content-section" id="performance">
           <div className="dashboard-section-heading">
             <div>
@@ -507,16 +984,31 @@ function Dashboard() {
           </div>
 
           <div className="dashboard-analytics-grid">
-            <article><span>Exams Attempted</span><strong>{results.length}</strong></article>
-            <article><span>Average Score</span><strong>{averageScore}/100</strong></article>
-            <article><span>Best Score</span><strong>{bestScore}/100</strong></article>
+            <article>
+              <span>Exams Attempted</span>
+              <strong>{results.length}</strong>
+            </article>
+            <article>
+              <span>Average Score</span>
+              <strong>{averageScore}/100</strong>
+            </article>
+            <article>
+              <span>Best Score</span>
+              <strong>{bestScore}/100</strong>
+            </article>
             <article>
               <span>Total Correct Answers</span>
-              <strong>{results.reduce((sum, r) => sum + Number(r.correct_answers || 0), 0)}</strong>
+              <strong>
+                {results.reduce(
+                  (sum, r) => sum + Number(r.correct_answers || 0),
+                  0
+                )}
+              </strong>
             </article>
           </div>
         </section>
 
+        {/* LEADERBOARD */}
         <section className="dashboard-content-section" id="leaderboard">
           <div className="dashboard-section-heading">
             <div>
@@ -532,7 +1024,9 @@ function Dashboard() {
           ) : (
             <div className="dashboard-leaderboard">
               {leaderboard.map((person) => (
-                <article key={`${person.candidate_rank}-${person.candidate_name}-${person.exam_name}`}>
+                <article
+                  key={`${person.candidate_rank}-${person.candidate_name}-${person.exam_name}`}
+                >
                   <span className="dashboard-rank">
                     {person.candidate_rank <= 3
                       ? <Medal size={19} />
@@ -548,6 +1042,7 @@ function Dashboard() {
             </div>
           )}
         </section>
+
       </div>
     </section>
   );

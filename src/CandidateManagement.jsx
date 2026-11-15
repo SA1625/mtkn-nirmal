@@ -1,23 +1,11 @@
 
-import React, { useEffect, useState } from "react";
+import React, { useEffect, useMemo, useState } from "react";
 import { useNavigate } from "react-router-dom";
-import {
-  ArrowLeft,
-  Search,
-  Users,
-  RefreshCw,
-  Mail,
-  Phone,
-  MapPin,
-  CalendarDays,
-} from "lucide-react";
-
+import { ArrowLeft, Search, RefreshCw, Download } from "lucide-react";
 import { supabase } from "./supabase";
-import "./CandidateManagement.css";
 
 function CandidateManagement() {
   const navigate = useNavigate();
-
   const [candidates, setCandidates] = useState([]);
   const [search, setSearch] = useState("");
   const [loading, setLoading] = useState(true);
@@ -27,175 +15,164 @@ function CandidateManagement() {
     setLoading(true);
     setError("");
 
-    const { data, error } = await supabase
-      .from("profiles")
-      .select(
-        "id, full_name, mobile_number, address, pin_code, email, role, created_at"
-      )
-      .order("created_at", { ascending: false });
+    try {
+      const { data: { user }, error: authError } =
+        await supabase.auth.getUser();
+      if (authError) throw authError;
+      if (!user) {
+        navigate("/admin-login");
+        return;
+      }
 
-    if (error) {
-      setError(error.message);
-      setCandidates([]);
-    } else {
-      setCandidates(data || []);
+      const { data: current, error: currentError } = await supabase
+        .from("profiles")
+        .select("role")
+        .eq("id", user.id)
+        .single();
+
+      if (currentError) throw currentError;
+      if (!["admin", "super_admin"].includes(current.role)) {
+        navigate("/admin-login");
+        return;
+      }
+
+      const { data, error } = await supabase
+        .from("profiles")
+        .select("id, full_name, email, mobile_number, address, pin_code, role, created_at")
+        .order("created_at", { ascending: false });
+
+      if (error) throw error;
+      setCandidates((data || []).filter(item => item.role === "candidate"));
+    } catch (err) {
+      setError(err.message || "Unable to load candidates.");
+    } finally {
+      setLoading(false);
     }
-
-    setLoading(false);
   };
 
   useEffect(() => {
     loadCandidates();
   }, []);
 
-  const filteredCandidates = candidates.filter((candidate) => {
+  const filtered = useMemo(() => {
     const term = search.toLowerCase();
-
-    return (
-      (candidate.full_name || "").toLowerCase().includes(term) ||
-      (candidate.email || "").toLowerCase().includes(term) ||
-      (candidate.mobile_number || "").includes(term)
+    return candidates.filter(candidate =>
+      [
+        candidate.full_name,
+        candidate.email,
+        candidate.mobile_number,
+        candidate.pin_code
+      ].some(value => String(value || "").toLowerCase().includes(term))
     );
-  });
+  }, [candidates, search]);
 
-  const formatDate = (date) => {
-    if (!date) return "Not available";
+  const exportCSV = () => {
+    const rows = [
+      ["Name", "Email", "Mobile", "Address", "PIN Code", "Registration Date"],
+      ...filtered.map(item => [
+        item.full_name, item.email, item.mobile_number,
+        item.address, item.pin_code, item.created_at
+      ])
+    ];
 
-    return new Date(date).toLocaleDateString("en-IN", {
-      day: "2-digit",
-      month: "short",
-      year: "numeric",
-    });
+    const csv = rows.map(row =>
+      row.map(value => `"${String(value ?? "").replace(/"/g, '""')}"`).join(",")
+    ).join("\n");
+
+    const blob = new Blob([csv], { type: "text/csv;charset=utf-8;" });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement("a");
+    a.href = url;
+    a.download = "islamic-quiz-candidates.csv";
+    a.click();
+    URL.revokeObjectURL(url);
   };
 
   return (
-    <main className="candidate-management-page">
-      <div className="candidate-management-container">
-
-        <button
-          className="candidate-back-button"
-          onClick={() => navigate("/admin")}
-        >
-          <ArrowLeft size={18} />
-          Back to Admin Dashboard
+    <main style={s.page}>
+      <div style={s.container}>
+        <button style={s.back} onClick={() => navigate("/admin")}>
+          <ArrowLeft size={18} /> Admin Dashboard
         </button>
 
-        <div className="candidate-management-heading">
-          <div>
-            <span>ADMINISTRATION</span>
-            <h1>Candidate Management</h1>
-            <p>View and manage registered quiz candidates.</p>
-          </div>
+        <h1>CANDIDATE MANAGEMENT</h1>
+        <p style={s.muted}>Registered candidate records.</p>
 
-          <button
-            className="candidate-refresh-button"
-            onClick={loadCandidates}
-            disabled={loading}
-          >
-            <RefreshCw size={17} />
-            Refresh
+        <div style={s.toolbar}>
+          <input
+            style={s.input}
+            value={search}
+            onChange={e => setSearch(e.target.value)}
+            placeholder="Search name, email, mobile or PIN..."
+          />
+          <button style={s.button} onClick={loadCandidates}>
+            <RefreshCw size={16} /> Refresh
+          </button>
+          <button style={s.button} onClick={exportCSV}>
+            <Download size={16} /> Export CSV
           </button>
         </div>
 
-        <section className="candidate-stats">
-          <div className="candidate-stat-icon">
-            <Users size={25} />
-          </div>
-          <div>
-            <p>TOTAL REGISTERED ACCOUNTS</p>
-            <h2>{candidates.length}</h2>
-          </div>
+        <section style={s.stats}>
+          <span>Total Registered Candidates</span>
+          <strong>{candidates.length}</strong>
         </section>
 
-        <div className="candidate-search">
-          <Search size={20} />
-          <input
-            type="text"
-            placeholder="Search by name, email or mobile number..."
-            value={search}
-            onChange={(e) => setSearch(e.target.value)}
-          />
-        </div>
+        {error && <p style={s.error}>{error}</p>}
 
-        {loading ? (
-          <div className="candidate-message">
-            Loading registered candidates...
+        {loading ? <p>Loading candidates...</p> : (
+          <div style={s.tableWrap}>
+            <table style={s.table}>
+              <thead>
+                <tr>
+                  <th>Candidate</th>
+                  <th>Contact</th>
+                  <th>Address</th>
+                  <th>PIN Code</th>
+                  <th>Registered</th>
+                </tr>
+              </thead>
+              <tbody>
+                {filtered.map(candidate => (
+                  <tr key={candidate.id}>
+                    <td>
+                      <strong>{candidate.full_name || "—"}</strong>
+                      <small style={s.small}>{candidate.id}</small>
+                    </td>
+                    <td>
+                      {candidate.email || "—"}
+                      <small style={s.small}>{candidate.mobile_number || "—"}</small>
+                    </td>
+                    <td>{candidate.address || "—"}</td>
+                    <td>{candidate.pin_code || "—"}</td>
+                    <td>{candidate.created_at ? new Date(candidate.created_at).toLocaleDateString() : "—"}</td>
+                  </tr>
+                ))}
+                {!filtered.length && (
+                  <tr><td colSpan="5">No candidates found.</td></tr>
+                )}
+              </tbody>
+            </table>
           </div>
-        ) : error ? (
-          <div className="candidate-error">
-            Unable to load candidates: {error}
-          </div>
-        ) : filteredCandidates.length === 0 ? (
-          <div className="candidate-message">
-            No matching candidates found.
-          </div>
-        ) : (
-          <section className="candidate-list">
-            <div className="candidate-list-heading">
-              <h2>REGISTERED ACCOUNTS</h2>
-              <span>{filteredCandidates.length} records</span>
-            </div>
-
-            {filteredCandidates.map((candidate) => (
-              <article
-                className="candidate-card"
-                key={candidate.id}
-              >
-                <div className="candidate-card-top">
-                  <div className="candidate-avatar">
-                    {(candidate.full_name || "C")
-                      .charAt(0)
-                      .toUpperCase()}
-                  </div>
-
-                  <div className="candidate-name">
-                    <h3>{candidate.full_name || "Unnamed Candidate"}</h3>
-                    <span className="candidate-id">
-                      ID: {candidate.id.slice(0, 8)}
-                    </span>
-                  </div>
-
-                  <span className={`candidate-role ${candidate.role}`}>
-                    {(candidate.role || "candidate").replace("_", " ")}
-                  </span>
-                </div>
-
-                <div className="candidate-details">
-                  <div>
-                    <Mail size={16} />
-                    <span>{candidate.email || "Not available"}</span>
-                  </div>
-
-                  <div>
-                    <Phone size={16} />
-                    <span>{candidate.mobile_number || "Not available"}</span>
-                  </div>
-
-                  <div>
-                    <MapPin size={16} />
-                    <span>
-                      {candidate.address || "Not available"}
-                      {candidate.pin_code
-                        ? ` - ${candidate.pin_code}`
-                        : ""}
-                    </span>
-                  </div>
-
-                  <div>
-                    <CalendarDays size={16} />
-                    <span>
-                      Registered: {formatDate(candidate.created_at)}
-                    </span>
-                  </div>
-                </div>
-              </article>
-            ))}
-          </section>
         )}
-
       </div>
     </main>
   );
 }
+
+const s = {
+  page: { minHeight: "75vh", padding: "30px 16px", background: "#f5f7f4", color: "#173d32" },
+  container: { maxWidth: 1150, margin: "auto" },
+  back: { display: "flex", gap: 8, alignItems: "center", border: 0, background: "transparent", color: "#176b50", cursor: "pointer", marginBottom: 22 },
+  muted: { color: "#718078" },
+  toolbar: { display: "flex", flexWrap: "wrap", gap: 10, margin: "22px 0" },
+  input: { flex: 1, minWidth: 240, padding: 11, border: "1px solid #d5e2da", borderRadius: 7 },
+  button: { display: "flex", gap: 7, alignItems: "center", padding: "10px 14px", border: "1px solid #176b50", color: "#176b50", background: "white", borderRadius: 7, cursor: "pointer" },
+  stats: { background: "white", padding: 20, borderRadius: 12, display: "flex", justifyContent: "space-between", marginBottom: 18, border: "1px solid #e5ebe6" },
+  tableWrap: { overflowX: "auto", background: "white", borderRadius: 12, border: "1px solid #e5ebe6" },
+  table: { width: "100%", minWidth: 850, borderCollapse: "collapse", textAlign: "left" },
+  small: { display: "block", color: "#718078", fontSize: 11, marginTop: 4, maxWidth: 230, overflowWrap: "anywhere" },
+  error: { color: "#b42318" }
+};
 
 export default CandidateManagement;

@@ -1,12 +1,22 @@
-
 import React, { useEffect, useMemo, useState } from "react";
 import { useNavigate } from "react-router-dom";
 import {
-  ArrowLeft, Plus, Pencil, Trash2, CalendarDays,
-  Clock, ClipboardList, RefreshCw, X, Save,
-  Shuffle, ListChecks, Search, Eye, Send
+  ArrowLeft,
+  Plus,
+  Pencil,
+  Trash2,
+  CalendarDays,
+  Clock,
+  ClipboardList,
+  RefreshCw,
+  X,
+  Save,
+  ListChecks,
+  Send,
+  Layers,
 } from "lucide-react";
 import { supabase } from "./supabase";
+import SixLevelPaperGenerator from "./SixLevelPaperGenerator";
 import "./ExamManagement.css";
 
 const emptyForm = {
@@ -19,14 +29,20 @@ const emptyForm = {
 };
 
 const difficulties = [
-  "Foundation", "Beginner", "Intermediate",
-  "Moderate", "Advanced", "Expert"
+  "Foundation",
+  "Beginner",
+  "Intermediate",
+  "Moderate",
+  "Advanced",
+  "Expert",
 ];
 
 const toLocalInput = (value) => {
   if (!value) return "";
+
   const date = new Date(value);
   const offset = date.getTimezoneOffset();
+
   return new Date(date.getTime() - offset * 60000)
     .toISOString()
     .slice(0, 16);
@@ -59,12 +75,13 @@ function ExamManagement() {
     setError("");
 
     try {
-      const { data, error } = await supabase
+      const { data, error: loadError } = await supabase
         .from("exams")
         .select("*")
         .order("created_at", { ascending: false });
 
-      if (error) throw error;
+      if (loadError) throw loadError;
+
       setExams(data || []);
     } catch (err) {
       setError(err.message || "Unable to load examinations.");
@@ -75,21 +92,27 @@ function ExamManagement() {
 
   useEffect(() => {
     const checkAdmin = async () => {
-      const { data: { user }, error: authError } =
-        await supabase.auth.getUser();
+      const {
+        data: { user },
+        error: authError,
+      } = await supabase.auth.getUser();
 
       if (authError || !user) {
         navigate("/admin-login", { replace: true });
         return;
       }
 
-      const { data, error } = await supabase
+      const { data, error: profileError } = await supabase
         .from("profiles")
         .select("role")
         .eq("id", user.id)
         .single();
 
-      if (error || !data || !["admin", "super_admin"].includes(data.role)) {
+      if (
+        profileError ||
+        !data ||
+        !["admin", "super_admin"].includes(data.role)
+      ) {
         navigate("/admin-login", { replace: true });
         return;
       }
@@ -110,6 +133,13 @@ function ExamManagement() {
   };
 
   const openEdit = (exam) => {
+    if (exam.series_id) {
+      setMessage(
+        "Generated level papers cannot be edited from the single-exam editor."
+      );
+      return;
+    }
+
     setEditingId(exam.id);
     setForm({
       exam_name: exam.exam_name || "",
@@ -119,18 +149,23 @@ function ExamManagement() {
       selection_mode: exam.selection_mode || "automatic",
       status: exam.status || "draft",
     });
+
     setMessage("");
     setError("");
     setShowForm(true);
   };
 
-  const handleSave = async (e) => {
-    e.preventDefault();
+  const handleSave = async (event) => {
+    event.preventDefault();
     setMessage("");
     setError("");
 
-    if (!form.exam_name.trim() || !form.exam_date || !form.availability_end) {
-      setMessage("Please complete all required fields.");
+    if (
+      !form.exam_name.trim() ||
+      !form.exam_date ||
+      !form.availability_end
+    ) {
+      setError("Please complete all required fields.");
       return;
     }
 
@@ -138,18 +173,23 @@ function ExamManagement() {
     const end = new Date(form.availability_end);
     const duration = Number(form.duration_minutes);
 
+    if (Number.isNaN(start.getTime()) || Number.isNaN(end.getTime())) {
+      setError("Please enter valid examination dates.");
+      return;
+    }
+
     if (end <= start) {
-      setMessage("Availability end must be after the exam start.");
+      setError("Availability end must be after the exam start.");
       return;
     }
 
     if (end - start > 15 * 24 * 60 * 60 * 1000) {
-      setMessage("Exam availability cannot exceed 15 days.");
+      setError("Exam availability cannot exceed 15 days.");
       return;
     }
 
     if (!Number.isInteger(duration) || duration < 1 || duration > 180) {
-      setMessage("Duration must be between 1 and 180 minutes.");
+      setError("Duration must be between 1 and 180 minutes.");
       return;
     }
 
@@ -157,7 +197,7 @@ function ExamManagement() {
       const existing = exams.find((exam) => exam.id === editingId);
 
       if (existing?.status === "published") {
-        setMessage("Unpublish the examination before editing it.");
+        setError("Unpublish the examination before editing it.");
         return;
       }
     }
@@ -205,13 +245,20 @@ function ExamManagement() {
 
       await loadExams();
     } catch (err) {
-      setMessage(err.message || "Unable to save examination.");
+      setError(err.message || "Unable to save examination.");
     } finally {
       setSaving(false);
     }
   };
 
   const openBuilder = async (exam) => {
+    if (exam.series_id) {
+      setError(
+        "Generated level papers already have their question selection. Use the level paper workflow."
+      );
+      return;
+    }
+
     setBuilderExam(exam);
     setBuilderLoading(true);
     setError("");
@@ -248,9 +295,11 @@ function ExamManagement() {
     const term = builderSearch.toLowerCase();
 
     return bankQuestions.filter((question) => {
+      const questionText = (question.question_text || "").toLowerCase();
+      const topic = (question.topic || "").toLowerCase();
+
       const matchesSearch =
-        question.question_text.toLowerCase().includes(term) ||
-        (question.topic || "").toLowerCase().includes(term);
+        questionText.includes(term) || topic.includes(term);
 
       const matchesType =
         builderType === "all" || question.question_type === builderType;
@@ -264,28 +313,32 @@ function ExamManagement() {
   }, [bankQuestions, builderSearch, builderType, builderDifficulty]);
 
   const selectedQuestions = useMemo(
-    () => bankQuestions.filter((q) => selectedIds.includes(q.id)),
+    () => bankQuestions.filter((question) => selectedIds.includes(question.id)),
     [bankQuestions, selectedIds]
   );
 
   const tfSelected = selectedQuestions.filter(
-    (q) => q.question_type === "true_false"
+    (question) => question.question_type === "true_false"
   ).length;
 
   const mcqSelected = selectedQuestions.filter(
-    (q) => q.question_type === "mcq"
+    (question) => question.question_type === "mcq"
   ).length;
 
   const toggleQuestion = (id) => {
-    setSelectedIds((prev) =>
-      prev.includes(id)
-        ? prev.filter((item) => item !== id)
-        : [...prev, id]
+    setSelectedIds((previous) =>
+      previous.includes(id)
+        ? previous.filter((item) => item !== id)
+        : [...previous, id]
     );
   };
 
   const saveManualPaper = async () => {
-    if (selectedIds.length !== 100 || tfSelected !== 40 || mcqSelected !== 60) {
+    if (
+      selectedIds.length !== 100 ||
+      tfSelected !== 40 ||
+      mcqSelected !== 60
+    ) {
       setError(
         `Select exactly 100 questions: 40 True/False and 60 MCQs. Currently selected: ${tfSelected} + ${mcqSelected}.`
       );
@@ -298,8 +351,12 @@ function ExamManagement() {
 
     try {
       const ordered = [
-        ...selectedQuestions.filter((q) => q.question_type === "true_false"),
-        ...selectedQuestions.filter((q) => q.question_type === "mcq"),
+        ...selectedQuestions.filter(
+          (question) => question.question_type === "true_false"
+        ),
+        ...selectedQuestions.filter(
+          (question) => question.question_type === "mcq"
+        ),
       ];
 
       const { error: deleteError } = await supabase
@@ -321,7 +378,7 @@ function ExamManagement() {
 
       if (insertError) throw insertError;
 
-      setMessage("Manual exam paper saved successfully.");
+      setMessage("Manual examination paper saved successfully.");
       setBuilderExam(null);
       await loadExams();
     } catch (err) {
@@ -332,26 +389,43 @@ function ExamManagement() {
   };
 
   const publishExam = async (exam) => {
-    if (
-      !window.confirm(
-        `Prepare and publish "${exam.exam_name}"? The paper must contain exactly 40 True/False and 60 MCQs.`
-      )
-    ) return;
+    const isGeneratedLevel = Boolean(exam.series_id && exam.level_order);
+
+    const confirmation = isGeneratedLevel
+      ? `Publish "${exam.exam_name}"? The generated paper will keep its existing 100 selected questions.`
+      : `Prepare and publish "${exam.exam_name}"? The paper must contain exactly 40 True/False and 60 MCQs.`;
+
+    if (!window.confirm(confirmation)) return;
 
     setSaving(true);
     setError("");
     setMessage("");
 
     try {
-      const { data, error } = await supabase.rpc("prepare_exam_paper", {
-        p_exam_id: exam.id,
-      });
+      if (isGeneratedLevel) {
+        const { error: publishError } = await supabase
+          .from("exams")
+          .update({
+            status: "published",
+            updated_at: new Date().toISOString(),
+          })
+          .eq("id", exam.id);
 
-      if (error) throw error;
+        if (publishError) throw publishError;
 
-      setMessage(
-        `Published successfully: ${data.true_false_count} True/False + ${data.mcq_count} MCQ.`
-      );
+        setMessage(`${exam.exam_name} published successfully.`);
+      } else {
+        const { data, error: prepareError } = await supabase.rpc(
+          "prepare_exam_paper",
+          { p_exam_id: exam.id }
+        );
+
+        if (prepareError) throw prepareError;
+
+        setMessage(
+          `Published successfully: ${data.true_false_count} True/False + ${data.mcq_count} MCQ.`
+        );
+      }
 
       await loadExams();
     } catch (err) {
@@ -364,9 +438,10 @@ function ExamManagement() {
   const changeStatus = async (exam, status) => {
     setSaving(true);
     setError("");
+    setMessage("");
 
     try {
-      const { error } = await supabase
+      const { error: updateError } = await supabase
         .from("exams")
         .update({
           status,
@@ -374,7 +449,9 @@ function ExamManagement() {
         })
         .eq("id", exam.id);
 
-      if (error) throw error;
+      if (updateError) throw updateError;
+
+      setMessage(`${exam.exam_name} status updated.`);
       await loadExams();
     } catch (err) {
       setError(err.message || "Unable to update exam status.");
@@ -384,20 +461,32 @@ function ExamManagement() {
   };
 
   const deleteExam = async (exam) => {
-    if (!window.confirm(`Delete "${exam.exam_name}"? This cannot be undone.`)) {
+    if (
+      !window.confirm(
+        `Delete "${exam.exam_name}"? This action cannot be undone.`
+      )
+    ) {
       return;
     }
 
+    setSaving(true);
+    setError("");
+    setMessage("");
+
     try {
-      const { error } = await supabase
+      const { error: deleteError } = await supabase
         .from("exams")
         .delete()
         .eq("id", exam.id);
 
-      if (error) throw error;
+      if (deleteError) throw deleteError;
+
+      setMessage("Examination deleted.");
       await loadExams();
     } catch (err) {
       setError(err.message || "Unable to delete examination.");
+    } finally {
+      setSaving(false);
     }
   };
 
@@ -409,10 +498,17 @@ function ExamManagement() {
     );
   }
 
+  const generatedExams = exams.filter(
+    (exam) => exam.series_id && exam.level_order
+  );
+
+  const normalExams = exams.filter(
+    (exam) => !exam.series_id || !exam.level_order
+  );
+
   return (
     <main className="exam-page">
       <div className="exam-container">
-
         <button className="exam-back" onClick={() => navigate("/admin")}>
           <ArrowLeft size={18} /> Back to Admin Dashboard
         </button>
@@ -440,6 +536,8 @@ function ExamManagement() {
         {error && <p className="exam-alert">{error}</p>}
         {message && <p className="exam-message">{message}</p>}
 
+        <SixLevelPaperGenerator onGenerated={loadExams} />
+
         {showForm && (
           <section className="exam-form-card">
             <div className="exam-form-title">
@@ -453,7 +551,9 @@ function ExamManagement() {
               <label>Examination Name</label>
               <input
                 value={form.exam_name}
-                onChange={(e) => setForm({ ...form, exam_name: e.target.value })}
+                onChange={(event) =>
+                  setForm({ ...form, exam_name: event.target.value })
+                }
                 placeholder="Example: Islamic Quiz 2026"
                 required
               />
@@ -464,7 +564,9 @@ function ExamManagement() {
                   <input
                     type="datetime-local"
                     value={form.exam_date}
-                    onChange={(e) => setForm({ ...form, exam_date: e.target.value })}
+                    onChange={(event) =>
+                      setForm({ ...form, exam_date: event.target.value })
+                    }
                     required
                   />
                 </div>
@@ -474,7 +576,12 @@ function ExamManagement() {
                   <input
                     type="datetime-local"
                     value={form.availability_end}
-                    onChange={(e) => setForm({ ...form, availability_end: e.target.value })}
+                    onChange={(event) =>
+                      setForm({
+                        ...form,
+                        availability_end: event.target.value,
+                      })
+                    }
                     required
                   />
                 </div>
@@ -483,10 +590,12 @@ function ExamManagement() {
               <label>Duration</label>
               <select
                 value={form.duration_minutes}
-                onChange={(e) => setForm({
-                  ...form,
-                  duration_minutes: Number(e.target.value),
-                })}
+                onChange={(event) =>
+                  setForm({
+                    ...form,
+                    duration_minutes: Number(event.target.value),
+                  })
+                }
               >
                 <option value={60}>1 Hour</option>
                 <option value={90}>1 Hour 30 Minutes</option>
@@ -498,7 +607,9 @@ function ExamManagement() {
               <label>Question Selection Mode</label>
               <select
                 value={form.selection_mode}
-                onChange={(e) => setForm({ ...form, selection_mode: e.target.value })}
+                onChange={(event) =>
+                  setForm({ ...form, selection_mode: event.target.value })
+                }
               >
                 <option value="automatic">Automatic Random Selection</option>
                 <option value="manual">Manual Selection by Admin</option>
@@ -513,13 +624,13 @@ function ExamManagement() {
               </div>
 
               <p className="exam-info">
-                Examinations are saved as drafts first. Prepare the paper before publishing.
+                Examinations are saved as drafts first. Prepare the paper
+                before publishing.
               </p>
 
-              {message && <p className="exam-message">{message}</p>}
-
               <button className="exam-save" type="submit" disabled={saving}>
-                <Save size={17} /> {saving ? "Saving..." : "Save Examination"}
+                <Save size={17} />
+                {saving ? "Saving..." : "Save Examination"}
               </button>
             </form>
           </section>
@@ -532,6 +643,7 @@ function ExamManagement() {
                 <h2>MANUAL PAPER BUILDER</h2>
                 <p>{builderExam.exam_name}</p>
               </div>
+
               <button onClick={() => setBuilderExam(null)}>
                 <X />
               </button>
@@ -545,7 +657,9 @@ function ExamManagement() {
 
             <div className="exam-selection-progress">
               <div
-                style={{ width: `${Math.min(selectedIds.length, 100)}%` }}
+                style={{
+                  width: `${Math.min(selectedIds.length, 100)}%`,
+                }}
               />
             </div>
 
@@ -553,12 +667,12 @@ function ExamManagement() {
               <input
                 placeholder="Search question or topic..."
                 value={builderSearch}
-                onChange={(e) => setBuilderSearch(e.target.value)}
+                onChange={(event) => setBuilderSearch(event.target.value)}
               />
 
               <select
                 value={builderType}
-                onChange={(e) => setBuilderType(e.target.value)}
+                onChange={(event) => setBuilderType(event.target.value)}
               >
                 <option value="all">All question types</option>
                 <option value="true_false">True / False</option>
@@ -567,11 +681,15 @@ function ExamManagement() {
 
               <select
                 value={builderDifficulty}
-                onChange={(e) => setBuilderDifficulty(e.target.value)}
+                onChange={(event) =>
+                  setBuilderDifficulty(event.target.value)
+                }
               >
                 <option value="all">All difficulties</option>
-                {difficulties.map((d) => (
-                  <option key={d} value={d}>{d}</option>
+                {difficulties.map((difficulty) => (
+                  <option key={difficulty} value={difficulty}>
+                    {difficulty}
+                  </option>
                 ))}
               </select>
             </div>
@@ -594,7 +712,9 @@ function ExamManagement() {
 
                   return (
                     <label
-                      className={`exam-bank-question ${checked ? "selected" : ""}`}
+                      className={`exam-bank-question ${
+                        checked ? "selected" : ""
+                      }`}
                       key={question.id}
                     >
                       <input
@@ -603,11 +723,16 @@ function ExamManagement() {
                         disabled={(!checked && sectionFull) || totalFull}
                         onChange={() => toggleQuestion(question.id)}
                       />
+
                       <div>
                         <span>
-                          {type === "true_false" ? "SECTION A · TRUE/FALSE" : "SECTION B · MCQ"}
-                          {" · "}{question.difficulty}
+                          {type === "true_false"
+                            ? "SECTION A · TRUE/FALSE"
+                            : "SECTION B · MCQ"}
+                          {" · "}
+                          {question.difficulty}
                         </span>
+
                         <strong>{question.question_text}</strong>
                         <small>{question.topic}</small>
                       </div>
@@ -618,9 +743,8 @@ function ExamManagement() {
             )}
 
             <div className="exam-builder-actions">
-              <button onClick={() => setBuilderExam(null)}>
-                Cancel
-              </button>
+              <button onClick={() => setBuilderExam(null)}>Cancel</button>
+
               <button
                 className="exam-save"
                 onClick={saveManualPaper}
@@ -634,7 +758,81 @@ function ExamManagement() {
         )}
 
         <div className="exam-list-heading">
-          <h2>ALL EXAMINATIONS</h2>
+          <h2>GENERATED SIX-LEVEL EXAMINATIONS</h2>
+          <button onClick={loadExams} disabled={loading}>
+            <RefreshCw size={16} /> Refresh
+          </button>
+        </div>
+
+        {generatedExams.length === 0 ? (
+          <div className="exam-empty">
+            <Layers size={35} />
+            <h3>No generated level papers yet</h3>
+            <p>Import and review a question bank, then generate six papers.</p>
+          </div>
+        ) : (
+          <div className="exam-list">
+            {generatedExams
+              .sort((a, b) => a.level_order - b.level_order)
+              .map((exam) => (
+                <article className="exam-card" key={exam.id}>
+                  <div className="exam-card-top">
+                    <span className={`exam-status ${exam.status}`}>
+                      {(exam.status || "draft").toUpperCase()}
+                    </span>
+                    <span>
+                      <Layers size={14} /> LEVEL {exam.level_order} OF 6
+                    </span>
+                  </div>
+
+                  <h3>{exam.level_name || exam.exam_name}</h3>
+
+                  <p>
+                    <CalendarDays size={16} /> Starts:{" "}
+                    {new Date(exam.exam_date).toLocaleString()}
+                  </p>
+                  <p>
+                    <Clock size={16} /> Duration: {exam.duration_minutes}{" "}
+                    minutes
+                  </p>
+                  <p>
+                    Availability ends:{" "}
+                    {new Date(exam.availability_end).toLocaleString()}
+                  </p>
+                  <p>100 Questions · 40 True/False · 60 MCQ</p>
+
+                  <div className="exam-card-actions">
+                    {exam.status === "published" ? (
+                      <button
+                        onClick={() => changeStatus(exam, "unpublished")}
+                        disabled={saving}
+                      >
+                        Unpublish
+                      </button>
+                    ) : (
+                      <button
+                        onClick={() => publishExam(exam)}
+                        disabled={saving}
+                      >
+                        <Send size={16} /> Publish
+                      </button>
+                    )}
+
+                    <button
+                      className="exam-delete"
+                      onClick={() => deleteExam(exam)}
+                      disabled={saving}
+                    >
+                      <Trash2 size={16} /> Delete
+                    </button>
+                  </div>
+                </article>
+              ))}
+          </div>
+        )}
+
+        <div className="exam-list-heading">
+          <h2>OTHER EXAMINATIONS</h2>
           <button onClick={loadExams} disabled={loading}>
             <RefreshCw size={16} /> Refresh
           </button>
@@ -642,36 +840,47 @@ function ExamManagement() {
 
         {loading ? (
           <p>Loading examinations...</p>
-        ) : exams.length === 0 ? (
+        ) : normalExams.length === 0 ? (
           <div className="exam-empty">
             <CalendarDays size={35} />
-            <h3>No examinations created yet</h3>
-            <p>Create your first examination to get started.</p>
+            <h3>No other examinations created</h3>
+            <p>Create a separate examination if required.</p>
           </div>
         ) : (
           <div className="exam-list">
-            {exams.map((exam) => (
+            {normalExams.map((exam) => (
               <article className="exam-card" key={exam.id}>
                 <div className="exam-card-top">
                   <span className={`exam-status ${exam.status}`}>
-                    {exam.status.toUpperCase()}
+                    {(exam.status || "draft").toUpperCase()}
                   </span>
-                  <span>{exam.selection_mode.toUpperCase()} MODE</span>
+                  <span>
+                    {(exam.selection_mode || "automatic").toUpperCase()} MODE
+                  </span>
                 </div>
 
                 <h3>{exam.exam_name}</h3>
 
-                <p><CalendarDays size={16} /> Starts: {new Date(exam.exam_date).toLocaleString()}</p>
-                <p><Clock size={16} /> Duration: {exam.duration_minutes} minutes</p>
-                <p>Availability ends: {new Date(exam.availability_end).toLocaleString()}</p>
+                <p>
+                  <CalendarDays size={16} /> Starts:{" "}
+                  {new Date(exam.exam_date).toLocaleString()}
+                </p>
+                <p>
+                  <Clock size={16} /> Duration: {exam.duration_minutes} minutes
+                </p>
+                <p>
+                  Availability ends:{" "}
+                  {new Date(exam.availability_end).toLocaleString()}
+                </p>
                 <p>100 Questions · 40 True/False · 60 MCQ</p>
 
                 <div className="exam-card-actions">
-                  {exam.status !== "published" && exam.selection_mode === "manual" && (
-                    <button onClick={() => openBuilder(exam)}>
-                      <ListChecks size={16} /> Build Paper
-                    </button>
-                  )}
+                  {exam.status !== "published" &&
+                    exam.selection_mode === "manual" && (
+                      <button onClick={() => openBuilder(exam)}>
+                        <ListChecks size={16} /> Build Paper
+                      </button>
+                    )}
 
                   <button
                     onClick={() => openEdit(exam)}
@@ -681,16 +890,26 @@ function ExamManagement() {
                   </button>
 
                   {exam.status === "published" ? (
-                    <button onClick={() => changeStatus(exam, "unpublished")} disabled={saving}>
+                    <button
+                      onClick={() => changeStatus(exam, "unpublished")}
+                      disabled={saving}
+                    >
                       Unpublish
                     </button>
                   ) : (
-                    <button onClick={() => publishExam(exam)} disabled={saving}>
+                    <button
+                      onClick={() => publishExam(exam)}
+                      disabled={saving}
+                    >
                       <Send size={16} /> Publish
                     </button>
                   )}
 
-                  <button className="exam-delete" onClick={() => deleteExam(exam)}>
+                  <button
+                    className="exam-delete"
+                    onClick={() => deleteExam(exam)}
+                    disabled={saving}
+                  >
                     <Trash2 size={16} /> Delete
                   </button>
                 </div>
@@ -698,7 +917,6 @@ function ExamManagement() {
             ))}
           </div>
         )}
-
       </div>
     </main>
   );

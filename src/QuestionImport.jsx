@@ -1,4 +1,3 @@
-
 import { useState } from "react";
 import { supabase } from "./supabase";
 import { createWorker } from "tesseract.js";
@@ -7,6 +6,29 @@ import pdfWorker from "pdfjs-dist/build/pdf.worker.min.mjs?url";
 import "./QuestionImport.css";
 
 pdfjsLib.GlobalWorkerOptions.workerSrc = pdfWorker;
+
+const MAX_PDF_SIZE = 25 * 1024 * 1024;
+const MAX_OCR_LENGTH = 120000;
+
+function getSafeFileName(name) {
+  return name.replace(/[^a-zA-Z0-9._-]/g, "_");
+}
+
+async function getAIErrorMessage(error) {
+  try {
+    if (error?.context && typeof error.context.json === "function") {
+      const responseData = await error.context.json();
+
+      if (responseData?.error) {
+        return responseData.error;
+      }
+    }
+  } catch {
+    // Use the normal error message if the response cannot be read.
+  }
+
+  return error?.message || "AI generation request failed.";
+}
 
 export default function QuestionImport() {
   const [file, setFile] = useState(null);
@@ -24,27 +46,52 @@ export default function QuestionImport() {
       return;
     }
 
+    if (
+      file.type !== "application/pdf" &&
+      !file.name.toLowerCase().endsWith(".pdf")
+    ) {
+      setMessage("Only PDF files are allowed.");
+      return;
+    }
+
+    if (file.size > MAX_PDF_SIZE) {
+      setMessage("PDF is too large. Maximum allowed size is 25 MB.");
+      return;
+    }
+
     setProcessing(true);
     setProgress(0);
     setPreview("");
     setMessage("");
+    setPageInfo("");
     setStage("Preparing PDF");
 
     let worker = null;
     let batchId = null;
+    let ocrCompleted = false;
 
     try {
-      const { data: userData, error: userError } =
-        await supabase.auth.getUser();
+      // 1. Verify logged-in administrator
+      const {
+        data: userData,
+        error: userError,
+      } = await supabase.auth.getUser();
 
-      if (userError || !userData.user) {
+      if (userError || !userData?.user) {
         throw new Error("Please login again.");
       }
 
-      const filePath =
-        `${userData.user.id}/${Date.now()}-${file.name.replace(/[^a-zA-Z0-9._-]/g, "_")}`;
+      const user = userData.user;
 
-      const { error: uploadError } = await supabase.storage
+      // 2. Upload original PDF
+      setStage("Uploading source PDF");
+
+      const filePath =
+        `${user.id}/${Date.now()}-${getSafeFileName(file.name)}`;
+
+      const {
+        error: uploadError,
+      } = await supabase.storage
         .from("question-bank-pdfs")
         .upload(filePath, file, {
           contentType: "application/pdf",
@@ -53,12 +100,18 @@ export default function QuestionImport() {
 
       if (uploadError) throw uploadError;
 
-      const { data: batch, error: batchError } = await supabase
+      // 3. Create import batch
+      setStage("Creating import batch");
+
+      const {
+        data: batch,
+        error: batchError,
+      } = await supabase
         .from("question_import_batches")
         .insert({
           file_name: file.name,
           file_path: filePath,
-          uploaded_by: userData.user.id,
+          uploaded_by: user.id,
           status: "processing",
           ocr_language: language,
         })
@@ -69,121 +122,236 @@ export default function QuestionImport() {
 
       batchId = batch.id;
 
+      // 4. Read PDF
       setStage("Reading PDF");
-      const pdfData = new Uint8Array(await file.arrayBuffer());
-      const pdf = await pdfjsLib.getDocument({ data: pdfData }).promise;
+
+      const pdfData = new Uint8Array(
+        await file.arrayBuffer()
+      );
+
+      const pdf = await pdfjsLib
+        .getDocument({ data: pdfData })
+        .promise;
 
       setPageInfo(`Total pages: ${pdf.numPages}`);
 
+      const {
+        error: pageCountError,
+      } = await supabase
+        .from("question_import_batches")
+        .update({
+          total_pages: pdf.numPages,
+        })
+        .eq("id", batchId);
+
+      if (pageCountError) throw pageCountError;
+
       let completeText = "";
 
-      await supabase
-        .from("question_import_batches")
-        .update({ total_pages: pdf.numPages })
-        .eq("id", batch.id);
-
-      setStage("Loading OCR language");
-      worker = await createWorker(language);
-
-      for (let pageNumber = 1; pageNumber <= pdf.numPages; pageNumber++) {
-        setMessage(`Reading page ${pageNumber} of ${pdf.numPages}`);
-
+      // 5. Extract text page by page.
+      // Digital PDFs use their existing text layer.
+      // Scanned PDFs use Tesseract OCR.
+      for (
+        let pageNumber = 1;
+        pageNumber <= pdf.numPages;
+        pageNumber++
+      ) {
         const page = await pdf.getPage(pageNumber);
-        const viewport = page.getViewport({ scale: 2 });
-        const canvas = document.createElement("canvas");
-        const context = canvas.getContext("2d");
 
-        canvas.width = Math.ceil(viewport.width);
-        canvas.height = Math.ceil(viewport.height);
+        setMessage(
+          `Processing page ${pageNumber} of ${pdf.numPages}`
+        );
 
-        await page.render({
-          canvasContext: context,
-          viewport,
-        }).promise;
+        const textContent = await page.getTextContent();
 
-        const result = await worker.recognize(canvas);
+        const digitalText = textContent.items
+          .filter((item) => typeof item.str === "string")
+          .map((item) => item.str)
+          .join(" ")
+          .trim();
+
+        let pageText = "";
+
+        if (digitalText.length >= 40) {
+          pageText = digitalText;
+          setStage("Extracting digital PDF text");
+        } else {
+          setStage("Running OCR on scanned page");
+
+          if (!worker) {
+            setMessage("Loading OCR language data...");
+            worker = await createWorker(language);
+          }
+
+          const viewport = page.getViewport({ scale: 2 });
+
+          const canvas = document.createElement("canvas");
+          const context = canvas.getContext("2d");
+
+          if (!context) {
+            throw new Error(
+              "Unable to create PDF rendering canvas."
+            );
+          }
+
+          canvas.width = Math.ceil(viewport.width);
+          canvas.height = Math.ceil(viewport.height);
+
+          await page.render({
+            canvasContext: context,
+            viewport,
+          }).promise;
+
+          const result = await worker.recognize(canvas);
+
+          pageText = result.data.text || "";
+
+          canvas.width = 0;
+          canvas.height = 0;
+        }
 
         completeText +=
-          `\n\n--- PAGE ${pageNumber} ---\n\n${result.data.text || ""}`;
+          `\n\n--- PAGE ${pageNumber} ---\n\n${pageText}`;
+
+        if (completeText.length > MAX_OCR_LENGTH) {
+          throw new Error(
+            "Extracted text exceeds the AI processing limit of 120,000 characters. Please split the PDF into smaller files."
+          );
+        }
 
         setPreview(completeText);
-        setProgress(Math.round((pageNumber / pdf.numPages) * 100));
+        setProgress(
+          Math.round((pageNumber / pdf.numPages) * 100)
+        );
 
-        const { error: saveError } = await supabase
+        const {
+          error: saveError,
+        } = await supabase
           .from("question_import_batches")
           .update({
             processed_pages: pageNumber,
             ocr_text: completeText,
           })
-          .eq("id", batch.id);
+          .eq("id", batchId);
 
         if (saveError) throw saveError;
 
-        canvas.width = 0;
-        canvas.height = 0;
+        page.cleanup();
       }
 
-      await worker.terminate();
-      worker = null;
+      // 6. Stop OCR worker
+      if (worker) {
+        await worker.terminate();
+        worker = null;
+      }
 
       if (completeText.trim().length < 100) {
         throw new Error(
-          "Very little text was detected. The scan may need better quality."
+          "Very little text was detected. Please use a clearer or better-quality PDF."
         );
       }
 
-      const { error: finishError } = await supabase
+      // 7. Save completed OCR
+      setStage("Saving extracted text");
+
+      const {
+        error: finishError,
+      } = await supabase
         .from("question_import_batches")
         .update({
           status: "needs_review",
           ocr_text: completeText,
           processed_pages: pdf.numPages,
         })
-        .eq("id", batch.id);
+        .eq("id", batchId);
 
       if (finishError) throw finishError;
 
-      setStage("Generating AI questions");
-      setMessage("OCR completed. AI is preparing question drafts...");
+      ocrCompleted = true;
 
-      const { data: aiData, error: aiError } =
-        await supabase.functions.invoke("generate-quiz-drafts", {
-          body: { batch_id: batch.id },
-        });
+      // 8. Generate AI question drafts
+      setStage("Generating AI questions");
+      setMessage(
+        "OCR completed. AI is preparing question drafts. Please do not close this page."
+      );
+
+      const {
+        data: aiData,
+        error: aiError,
+      } = await supabase.functions.invoke(
+        "generate-quiz-drafts",
+        {
+          body: {
+            batch_id: batchId,
+          },
+        }
+      );
 
       if (aiError) {
         throw new Error(
-          aiError.message || "AI generation request failed."
+          await getAIErrorMessage(aiError)
         );
       }
 
-      if (aiData?.error) {
-        throw new Error(aiData.error);
+      if (!aiData || aiData.error || aiData.success === false) {
+        throw new Error(
+          aiData?.error ||
+          aiData?.message ||
+          "AI question generation was unsuccessful."
+        );
       }
 
+      // 9. Completed
       setProgress(100);
       setStage("Completed");
+
       setMessage(
-        `AI generation completed. ${aiData.total} drafts prepared: ${aiData.true_false_count} True/False and ${aiData.mcq_count} MCQs. All drafts are pending Admin review.`
+        `AI generation completed successfully! ${aiData.total} drafts prepared: ${aiData.true_false_count} True/False and ${aiData.mcq_count} MCQs. All drafts are pending Admin review.`
       );
+
     } catch (error) {
+      console.error("PDF import error:", error);
+
       if (worker) {
-        await worker.terminate();
+        try {
+          await worker.terminate();
+        } catch (workerError) {
+          console.error(
+            "OCR worker cleanup error:",
+            workerError
+          );
+        }
       }
 
       if (batchId) {
-        await supabase
+        const batchStatus = ocrCompleted
+          ? "needs_review"
+          : "failed";
+
+        const errorMessage =
+          error?.message || "Unknown import error.";
+
+        const { error: updateError } = await supabase
           .from("question_import_batches")
           .update({
-            status: "failed",
-            notes: error.message,
+            status: batchStatus,
+            notes: `Import error: ${errorMessage.slice(0, 450)}`,
           })
           .eq("id", batchId);
+
+        if (updateError) {
+          console.error(
+            "Unable to update import batch status:",
+            updateError
+          );
+        }
       }
 
       setStage("Needs attention");
-      setMessage(`Import error: ${error.message}`);
-      console.error("PDF import error:", error);
+      setMessage(
+        `Import error: ${error?.message || "Something went wrong."}`
+      );
+
     } finally {
       setProcessing(false);
     }
@@ -199,25 +367,40 @@ export default function QuestionImport() {
       </header>
 
       <section className="import-card">
-        <label className="import-label">OCR LANGUAGE</label>
+        <label className="import-label">
+          OCR LANGUAGE
+        </label>
 
         <select
           value={language}
           onChange={(e) => setLanguage(e.target.value)}
           disabled={processing}
         >
-          <option value="eng">Roman English</option>
-          <option value="urd">Urdu</option>
-          <option value="eng+urd">Roman English + Urdu</option>
+          <option value="eng">
+            English
+          </option>
+
+          <option value="urd">
+            Urdu
+          </option>
+
+          <option value="eng+urd">
+            English + Urdu
+          </option>
         </select>
 
-        <label className="import-label">SELECT SOURCE PDF</label>
+        <label className="import-label">
+          SELECT SOURCE PDF
+        </label>
 
         <input
           type="file"
           accept=".pdf,application/pdf"
           onChange={(e) => {
-            setFile(e.target.files?.[0] || null);
+            const selectedFile =
+              e.target.files?.[0] || null;
+
+            setFile(selectedFile);
             setMessage("");
             setPreview("");
             setProgress(0);
@@ -234,11 +417,14 @@ export default function QuestionImport() {
         )}
 
         <button
+          type="button"
           className="ocr-button"
           onClick={startImport}
           disabled={processing || !file}
         >
-          {processing ? "PROCESSING..." : "UPLOAD PDF & GENERATE DRAFTS"}
+          {processing
+            ? "PROCESSING..."
+            : "UPLOAD PDF & GENERATE DRAFTS"}
         </button>
 
         {stage && (
@@ -254,21 +440,27 @@ export default function QuestionImport() {
             <div className="progress-track">
               <div
                 className="progress-fill"
-                style={{ width: `${progress}%` }}
+                style={{
+                  width: `${progress}%`,
+                }}
               />
             </div>
+
             <strong>{progress}%</strong>
           </div>
         )}
 
         {message && (
-          <p className="ocr-message">{message}</p>
+          <p className="ocr-message">
+            {message}
+          </p>
         )}
       </section>
 
       {preview && (
         <section className="ocr-preview">
           <h2>EXTRACTED SOURCE TEXT</h2>
+
           <textarea
             value={preview}
             readOnly

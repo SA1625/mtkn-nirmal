@@ -1,18 +1,30 @@
 
 import React from "react";
-import { Routes, Route, Navigate } from "react-router-dom";
+import {
+  BrowserRouter,
+  Routes,
+  Route,
+  Navigate,
+  useLocation
+} from "react-router-dom";
 
 import Header from "./Header";
 import Footer from "./Footer";
-
 import Welcome from "./Welcome";
 import Register from "./Register";
 import Login from "./Login";
 import AdminLogin from "./AdminLogin";
 import AuthCallback from "./AuthCallback";
 import Success from "./Success";
+
 import Dashboard from "./Dashboard";
 import Profile from "./Profile";
+import CandidateExam from "./CandidateExam";
+import ExamHistory from "./ExamHistory";
+import Leaderboard from "./Leaderboard";
+import PerformanceAnalytics from "./PerformanceAnalytics";
+
+import ProtectedRoute from "./ProtectedRoute";
 
 import AdminDashboard from "./AdminDashboard";
 import CandidateManagement from "./CandidateManagement";
@@ -22,16 +34,16 @@ import QuestionReview from "./QuestionReview";
 import ExamManagement from "./ExamManagement";
 import AdminResults from "./AdminResults";
 import AdminManagement from "./AdminManagement";
-import PortalSettings from "./PortalSettings";
 
-import CandidateExam from "./CandidateExam";
+function AppLayout() {
+  const location = useLocation();
 
-import ProtectedRoute from "./ProtectedRoute";
+  // Full-screen examination experience
+  const isExamPage = /^\/exam\/[^/]+$/.test(location.pathname);
 
-function App() {
   return (
     <>
-      <Header />
+      {!isExamPage && <Header />}
 
       <Routes>
         {/* PUBLIC PAGES */}
@@ -45,76 +57,145 @@ function App() {
         {/* CANDIDATE PAGES */}
         <Route
           path="/dashboard"
-          element={<ProtectedRoute><Dashboard /></ProtectedRoute>}
+          element={
+            <ProtectedRoute>
+              <Dashboard />
+            </ProtectedRoute>
+          }
         />
 
         <Route
           path="/profile"
-          element={<ProtectedRoute><Profile /></ProtectedRoute>}
+          element={
+            <ProtectedRoute>
+              <Profile />
+            </ProtectedRoute>
+          }
         />
 
         <Route
           path="/exam/:examId"
-          element={<ProtectedRoute><CandidateExam /></ProtectedRoute>}
+          element={
+            <ProtectedRoute>
+              <CandidateExam />
+            </ProtectedRoute>
+          }
         />
 
-        {/* ADMIN DASHBOARD */}
+        <Route
+          path="/my-exams"
+          element={
+            <ProtectedRoute>
+              <ExamHistory />
+            </ProtectedRoute>
+          }
+        />
+
+        <Route
+          path="/leaderboard"
+          element={
+            <ProtectedRoute>
+              <Leaderboard />
+            </ProtectedRoute>
+          }
+        />
+
+        <Route
+          path="/analytics"
+          element={
+            <ProtectedRoute>
+              <PerformanceAnalytics />
+            </ProtectedRoute>
+          }
+        />
+
+        {/* ADMIN PAGES */}
         <Route
           path="/admin"
-          element={<ProtectedRoute><AdminDashboard /></ProtectedRoute>}
+          element={
+            <ProtectedRoute>
+              <AdminDashboard />
+            </ProtectedRoute>
+          }
         />
 
-        {/* CANDIDATE MANAGEMENT */}
         <Route
           path="/admin/candidates"
-          element={<ProtectedRoute><CandidateManagement /></ProtectedRoute>}
+          element={
+            <ProtectedRoute>
+              <CandidateManagement />
+            </ProtectedRoute>
+          }
         />
 
-        {/* QUESTION BANK */}
         <Route
           path="/admin/questions"
-          element={<ProtectedRoute><QuestionBank /></ProtectedRoute>}
+          element={
+            <ProtectedRoute>
+              <QuestionBank />
+            </ProtectedRoute>
+          }
         />
 
         <Route
           path="/admin/questions/import"
-          element={<ProtectedRoute><QuestionImport /></ProtectedRoute>}
+          element={
+            <ProtectedRoute>
+              <QuestionImport />
+            </ProtectedRoute>
+          }
         />
 
         <Route
           path="/admin/question-review"
-          element={<ProtectedRoute><QuestionReview /></ProtectedRoute>}
+          element={
+            <ProtectedRoute>
+              <QuestionReview />
+            </ProtectedRoute>
+          }
         />
 
-        {/* EXAMINATION MANAGEMENT */}
         <Route
           path="/admin/exams"
-          element={<ProtectedRoute><ExamManagement /></ProtectedRoute>}
+          element={
+            <ProtectedRoute>
+              <ExamManagement />
+            </ProtectedRoute>
+          }
         />
 
-        {/* RESULTS & RANKINGS */}
         <Route
           path="/admin/results"
-          element={<ProtectedRoute><AdminResults /></ProtectedRoute>}
+          element={
+            <ProtectedRoute>
+              <AdminResults />
+            </ProtectedRoute>
+          }
         />
 
-        {/* SUPER ADMIN MODULES */}
         <Route
           path="/admin/management"
-          element={<ProtectedRoute><AdminManagement /></ProtectedRoute>}
+          element={
+            <ProtectedRoute>
+              <AdminManagement />
+            </ProtectedRoute>
+          }
         />
 
-        <Route
-          path="/admin/settings"
-          element={<ProtectedRoute><PortalSettings /></ProtectedRoute>}
-        />
-
-        {/* FALLBACK */}
+        {/* INVALID URL */}
         <Route path="*" element={<Navigate to="/" replace />} />
       </Routes>
 
-      <Footer />
+      {!isExamPage && <Footer />}
     </>
+  );
+}
+
+function App() {
+  return (
+    <BrowserRouter>
+      <AppLayout />
+    </BrowserRouter>
   );
 }
 

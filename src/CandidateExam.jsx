@@ -1,13 +1,158 @@
-
 import React, { useEffect, useRef, useState } from "react";
 import { useNavigate, useParams } from "react-router-dom";
 import {
-  Clock, ChevronLeft, ChevronRight, Flag,
-  CheckCircle, AlertTriangle, ShieldCheck,
-  Send, LogOut
+  Clock,
+  ChevronLeft,
+  ChevronRight,
+  Flag,
+  CheckCircle,
+  AlertTriangle,
+  ShieldCheck,
+  Send,
+  LogOut,
+  Download,
+  Eye,
+  ArrowRight,
+  Loader,
+  X
 } from "lucide-react";
 import { supabase } from "./supabase";
 import "./CandidateExam.css";
+
+const escapeHTML = (value) =>
+  String(value ?? "").replace(/[&<>"']/g, (c) => ({
+    "&": "&amp;",
+    "<": "&lt;",
+    ">": "&gt;",
+    '"': "&quot;",
+    "'": "&#39;"
+  })[c]);
+
+const formatOptions = (options) => {
+  if (!options) return [];
+
+  if (Array.isArray(options)) {
+    return options.map(String);
+  }
+
+  if (typeof options === "object") {
+    return Object.entries(options).map(
+      ([key, value]) => `${key}. ${value}`
+    );
+  }
+
+  return [];
+};
+
+function printHTML(title, body) {
+  const popup = window.open("", "_blank", "width=950,height=800");
+
+  if (!popup) {
+    alert("Please allow pop-ups to save your PDF report.");
+    return;
+  }
+
+  popup.document.open();
+  popup.document.write(`
+    <!doctype html>
+    <html>
+    <head>
+      <meta charset="UTF-8"/>
+      <title>${escapeHTML(title)}</title>
+      <style>
+        *{box-sizing:border-box}
+        body{font-family:Arial,sans-serif;color:#173d32;margin:0;padding:25px}
+        .sheet{max-width:850px;margin:auto;border:2px solid #176b50;padding:28px}
+        header{text-align:center;border-bottom:2px solid #176b50;padding-bottom:16px}
+        header h1{font-size:21px;margin:0 0 7px}
+        header p{margin:4px;font-size:13px}
+        h2{text-align:center;margin:25px 0 18px}
+        .score{text-align:center;background:#edf7f0;border:1px solid #b9d9c5;padding:22px;margin:20px 0}
+        .score strong{display:block;font-size:38px;color:#176b50}
+        table{width:100%;border-collapse:collapse;margin:16px 0}
+        th,td{border:1px solid #d5e2da;padding:9px;text-align:left;font-size:13px}
+        th{background:#edf5ef}
+        .question{border:1px solid #dce7df;padding:13px;margin:12px 0;break-inside:avoid}
+        .correct{color:#08734e;font-weight:bold}
+        .wrong{color:#b42318;font-weight:bold}
+        .muted{color:#687970}
+        .actions{text-align:center;margin:22px}
+        button{background:#176b50;color:white;border:0;padding:12px 24px;border-radius:6px}
+        @media print{body{padding:0}.actions{display:none}.sheet{border:0}}
+      </style>
+    </head>
+    <body>
+      <div class="sheet">
+        <header>
+          <h1>MAJLISE TAHAFFUZE KHATME NUBUWWAT TRUST</h1>
+          <p>NIRMAL DIST, TG</p>
+          <p>ISLAMIC QUIZ 2026</p>
+        </header>
+        ${body}
+      </div>
+      <div class="actions">
+        <button onclick="window.print()">Print / Save as PDF</button>
+      </div>
+      <script>window.onload=()=>window.focus()</script>
+    </body>
+    </html>
+  `);
+  popup.document.close();
+}
+
+const isCorrectAnswer = (question, selectedAnswer) => {
+  if (!selectedAnswer) return false;
+
+  const selected = String(selectedAnswer).trim().toLowerCase();
+  const correct = String(question.correct_answer ?? "").trim().toLowerCase();
+
+  if (selected === correct) return true;
+
+  const options = question.options;
+
+  if (Array.isArray(options)) {
+    const correctIndex = options.findIndex(
+      (option) => String(option).trim().toLowerCase() === correct
+    );
+
+    if (correctIndex >= 0) {
+      const letter = String.fromCharCode(65 + correctIndex).toLowerCase();
+
+      return (
+        selected === letter ||
+        selected === `${letter}. ${String(options[correctIndex]).trim().toLowerCase()}` ||
+        selected === String(options[correctIndex]).trim().toLowerCase()
+      );
+    }
+
+    const letterIndex = correct.match(/^[a-d]$/)?.[0];
+    if (letterIndex) {
+      const index = letterIndex.charCodeAt(0) - 97;
+      return selected === String(options[index] ?? "").trim().toLowerCase();
+    }
+  }
+
+  if (options && typeof options === "object" && !Array.isArray(options)) {
+    for (const [key, value] of Object.entries(options)) {
+      const k = key.trim().toLowerCase();
+      const v = String(value).trim().toLowerCase();
+
+      if (
+        correct === k ||
+        correct === v ||
+        correct === `${k}. ${v}`
+      ) {
+        return (
+          selected === k ||
+          selected === v ||
+          selected === `${k}. ${v}`
+        );
+      }
+    }
+  }
+
+  return false;
+};
 
 function CandidateExam() {
   const { examId } = useParams();
@@ -16,6 +161,7 @@ function CandidateExam() {
   const [stage, setStage] = useState("instructions");
   const [agreed, setAgreed] = useState(false);
   const [questions, setQuestions] = useState([]);
+  const [exam, setExam] = useState(null);
   const [examName, setExamName] = useState("ISLAMIC QUIZ 2026");
   const [attemptId, setAttemptId] = useState(null);
   const [answers, setAnswers] = useState({});
@@ -25,38 +171,93 @@ function CandidateExam() {
   const [loading, setLoading] = useState(false);
   const [saving, setSaving] = useState(false);
   const [result, setResult] = useState(null);
+  const [review, setReview] = useState(null);
+  const [reviewLoading, setReviewLoading] = useState(false);
+  const [nextExam, setNextExam] = useState(null);
   const [error, setError] = useState("");
+
+  const [violationCount, setViolationCount] = useState(0);
+  const [warningSeconds, setWarningSeconds] = useState(0);
+  const [showViolationWarning, setShowViolationWarning] = useState(false);
 
   const terminating = useRef(false);
   const submitting = useRef(false);
   const pendingSaves = useRef([]);
 
+  const violationCountRef = useRef(0);
+  const warningDeadlineRef = useRef(null);
+  const warningTimeoutRef = useRef(null);
+  const warningIntervalRef = useRef(null);
+  const warningDismissRef = useRef(null);
+
   const currentQuestion = questions[currentIndex];
   const answeredCount = Object.keys(answers).length;
   const unansweredCount = Math.max(0, questions.length - answeredCount);
 
-  const formatTime = (seconds) => {
-    const h = Math.floor(seconds / 3600);
-    const m = Math.floor((seconds % 3600) / 60);
-    const s = seconds % 60;
-    return [h, m, s].map((n) => String(n).padStart(2, "0")).join(":");
-  };
-
-  const normalizeOptions = (options) => {
-    if (!options) return [];
-    if (Array.isArray(options)) return options.map(String);
-
-    if (typeof options === "object") {
-      return Object.entries(options).map(
-        ([key, value]) => `${key}. ${value}`
-      );
+  const clearViolationTimers = () => {
+    if (warningTimeoutRef.current) {
+      window.clearTimeout(warningTimeoutRef.current);
+      warningTimeoutRef.current = null;
     }
 
-    return [];
+    if (warningIntervalRef.current) {
+      window.clearInterval(warningIntervalRef.current);
+      warningIntervalRef.current = null;
+    }
+
+    if (warningDismissRef.current) {
+      window.clearTimeout(warningDismissRef.current);
+      warningDismissRef.current = null;
+    }
+
+    warningDeadlineRef.current = null;
+  };
+
+  useEffect(() => {
+    let active = true;
+
+    const loadExam = async () => {
+      const { data, error: examError } = await supabase
+        .from("exams")
+        .select(
+          "id, exam_name, series_id, level_order, level_name, duration_minutes"
+        )
+        .eq("id", examId)
+        .single();
+
+      if (!active) return;
+
+      if (examError) {
+        setError(examError.message);
+        return;
+      }
+
+      setExam(data);
+      setExamName(data.exam_name || "ISLAMIC QUIZ 2026");
+    };
+
+    loadExam();
+
+    return () => {
+      active = false;
+    };
+  }, [examId]);
+
+  const formatTime = (seconds) => {
+    const safeSeconds = Math.max(0, seconds);
+    const h = Math.floor(safeSeconds / 3600);
+    const m = Math.floor((safeSeconds % 3600) / 60);
+    const s = safeSeconds % 60;
+
+    return [h, m, s]
+      .map((n) => String(n).padStart(2, "0"))
+      .join(":");
   };
 
   const saveAnswer = async (questionId, answer) => {
-    if (!attemptId) throw new Error("Exam attempt not found.");
+    if (!attemptId) {
+      throw new Error("Exam attempt not found.");
+    }
 
     const request = supabase.rpc("save_quiz_answer", {
       p_attempt_id: attemptId,
@@ -68,11 +269,11 @@ function CandidateExam() {
 
     try {
       const { error: saveError } = await request;
+
       if (saveError) throw saveError;
     } finally {
-      pendingSaves.current = pendingSaves.current.filter(
-        (item) => item !== request
-      );
+      pendingSaves.current =
+        pendingSaves.current.filter((item) => item !== request);
     }
   };
 
@@ -80,10 +281,10 @@ function CandidateExam() {
     if (!currentQuestion || saving || submitting.current) return;
 
     const questionId = currentQuestion.question_id;
-    const previousAnswer = answers[questionId];
+    const previous = answers[questionId];
 
-    setAnswers((prev) => ({
-      ...prev,
+    setAnswers((old) => ({
+      ...old,
       [questionId]: answer
     }));
 
@@ -93,19 +294,19 @@ function CandidateExam() {
     try {
       await saveAnswer(questionId, answer);
     } catch (err) {
-      setAnswers((prev) => {
-        const updated = { ...prev };
+      setAnswers((old) => {
+        const copy = { ...old };
 
-        if (previousAnswer === undefined) {
-          delete updated[questionId];
+        if (previous === undefined) {
+          delete copy[questionId];
         } else {
-          updated[questionId] = previousAnswer;
+          copy[questionId] = previous;
         }
 
-        return updated;
+        return copy;
       });
 
-      setError(err.message || "Answer could not be saved. Please try again.");
+      setError(err.message || "Answer could not be saved.");
     } finally {
       setSaving(false);
     }
@@ -115,47 +316,17 @@ function CandidateExam() {
     if (index < 0 || index >= questions.length) return;
 
     setCurrentIndex(index);
-    setVisited((prev) =>
-      prev.includes(index) ? prev : [...prev, index]
+
+    setVisited((old) =>
+      old.includes(index) ? old : [...old, index]
     );
-  };
-
-  const finishExam = async (automatic = false) => {
-    if (!attemptId || submitting.current || terminating.current) return;
-
-    submitting.current = true;
-    setLoading(true);
-    setError("");
-
-    try {
-      await Promise.all([...pendingSaves.current]);
-
-      const { data, error: submitError } = await supabase.rpc(
-        "submit_quiz_exam",
-        { p_attempt_id: attemptId }
-      );
-
-      if (submitError) throw submitError;
-
-      setResult({
-        ...data,
-        automatic
-      });
-
-      setStage("result");
-    } catch (err) {
-      submitting.current = false;
-      setError(err.message || "Unable to submit examination.");
-    } finally {
-      setLoading(false);
-    }
   };
 
   const terminateExam = async (reason) => {
     if (!attemptId || terminating.current || submitting.current) return;
 
     terminating.current = true;
-    setError("");
+    clearViolationTimers();
 
     try {
       const { error: terminateError } = await supabase.rpc(
@@ -170,10 +341,42 @@ function CandidateExam() {
 
       setStage("terminated");
     } catch (err) {
+      setError(err.message || "Could not record termination.");
       terminating.current = false;
-      setError(
-        err.message || "Termination could not be recorded. Contact the organizer."
+    }
+  };
+
+  const finishExam = async (automatic = false) => {
+    if (!attemptId || submitting.current || terminating.current) return;
+
+    submitting.current = true;
+    clearViolationTimers();
+    setLoading(true);
+    setError("");
+
+    try {
+      await Promise.all([...pendingSaves.current]);
+
+      const { data, error: submitError } = await supabase.rpc(
+        "submit_quiz_exam",
+        {
+          p_attempt_id: attemptId
+        }
       );
+
+      if (submitError) throw submitError;
+
+      setResult({
+        ...(data || {}),
+        automatic
+      });
+
+      setStage("result");
+    } catch (err) {
+      submitting.current = false;
+      setError(err.message || "Unable to submit examination.");
+    } finally {
+      setLoading(false);
     }
   };
 
@@ -186,7 +389,9 @@ function CandidateExam() {
     try {
       const { data, error: startError } = await supabase.rpc(
         "start_quiz_exam",
-        { p_exam_id: examId }
+        {
+          p_exam_id: examId
+        }
       );
 
       if (startError) throw startError;
@@ -196,11 +401,15 @@ function CandidateExam() {
         !Array.isArray(data.questions) ||
         data.questions.length !== 100
       ) {
-        throw new Error("The examination paper is incomplete or invalid.");
+        throw new Error(
+          "The examination paper is incomplete or invalid."
+        );
       }
 
       setAttemptId(data.attempt_id);
-      setExamName(data.exam_name || "ISLAMIC QUIZ 2026");
+      setExamName(
+        data.exam_name || exam?.exam_name || "ISLAMIC QUIZ 2026"
+      );
       setQuestions(data.questions);
       setAnswers({});
       setSecondsLeft(
@@ -214,6 +423,16 @@ function CandidateExam() {
 
       setVisited([0]);
       setCurrentIndex(0);
+      setResult(null);
+      setReview(null);
+      setNextExam(null);
+
+      violationCountRef.current = 0;
+      setViolationCount(0);
+      setWarningSeconds(0);
+      setShowViolationWarning(false);
+      clearViolationTimers();
+
       setStage("exam");
     } catch (err) {
       setError(err.message || "Unable to start examination.");
@@ -222,7 +441,7 @@ function CandidateExam() {
     }
   };
 
-  // Countdown
+  // Server-controlled time countdown
   useEffect(() => {
     if (stage !== "exam") return;
 
@@ -231,22 +450,100 @@ function CandidateExam() {
       return;
     }
 
-    const timer = setTimeout(() => {
-      setSecondsLeft((previous) => Math.max(0, previous - 1));
+    const timer = window.setTimeout(() => {
+      setSecondsLeft((old) => Math.max(0, old - 1));
     }, 1000);
 
-    return () => clearTimeout(timer);
+    return () => window.clearTimeout(timer);
   }, [stage, secondsLeft]);
 
-  // Tab switching / hidden exam window termination
+  // Tab-switching and exam-window discipline
   useEffect(() => {
-    if (stage !== "exam") return;
+    if (stage !== "exam" || !attemptId) return;
 
     const handleVisibility = () => {
       if (document.visibilityState === "hidden") {
-        terminateExam(
-          "Candidate switched tab, minimized or left the exam window."
+        if (warningDeadlineRef.current) return;
+
+        violationCountRef.current += 1;
+
+        const count = violationCountRef.current;
+        setViolationCount(count);
+
+        // Third switch: immediate termination
+        if (count >= 3) {
+          terminateExam(
+            "Third examination window violation. Attempt terminated automatically."
+          );
+          return;
+        }
+
+        // First switch: 30 seconds
+        // Second switch: 10 seconds
+        const duration = count === 1 ? 30 : 10;
+        const deadline = Date.now() + duration * 1000;
+
+        warningDeadlineRef.current = deadline;
+        setWarningSeconds(duration);
+        setShowViolationWarning(true);
+
+        const updateCountdown = () => {
+          const remaining = Math.max(
+            0,
+            Math.ceil((deadline - Date.now()) / 1000)
+          );
+
+          setWarningSeconds(remaining);
+
+          if (remaining <= 0) {
+            clearViolationTimers();
+
+            terminateExam(
+              count === 1
+                ? "First tab switch: candidate did not return within 30 seconds."
+                : "Second tab switch: candidate did not return within 10 seconds."
+            );
+          }
+        };
+
+        warningIntervalRef.current =
+          window.setInterval(updateCountdown, 250);
+
+        warningTimeoutRef.current = window.setTimeout(
+          updateCountdown,
+          duration * 1000
         );
+      } else {
+        // Candidate returned to the examination window
+        if (!warningDeadlineRef.current) return;
+
+        const remaining = Math.ceil(
+          (warningDeadlineRef.current - Date.now()) / 1000
+        );
+
+        if (remaining <= 0) {
+          clearViolationTimers();
+
+          terminateExam(
+            "Candidate returned after the examination window warning period expired."
+          );
+          return;
+        }
+
+        // Return before timeout cancels the termination timer
+        clearViolationTimers();
+
+        setWarningSeconds(0);
+        setShowViolationWarning(true);
+
+        if (warningDismissRef.current) {
+          window.clearTimeout(warningDismissRef.current);
+        }
+
+        warningDismissRef.current = window.setTimeout(() => {
+          setShowViolationWarning(false);
+          setWarningSeconds(0);
+        }, 3500);
       }
     };
 
@@ -254,11 +551,12 @@ function CandidateExam() {
 
     return () => {
       document.removeEventListener("visibilitychange", handleVisibility);
+      clearViolationTimers();
     };
   }, [stage, attemptId]);
 
   const confirmSubmit = async () => {
-    if (answeredCount !== questions.length) {
+    if (answeredCount !== 100) {
       setError(
         `You still have ${unansweredCount} unanswered questions.`
       );
@@ -267,11 +565,308 @@ function CandidateExam() {
 
     if (
       window.confirm(
-        "Are you sure you want to submit your examination? You cannot change answers after submission."
+        "Submit your examination? You cannot change answers afterwards."
       )
     ) {
       await finishExam(false);
     }
+  };
+
+  // Load candidate's own response review and result
+  const loadReview = async () => {
+    if (!attemptId) return;
+
+    setReviewLoading(true);
+    setError("");
+
+    try {
+      const { data, error: reviewError } = await supabase.rpc(
+        "get_my_exam_review",
+        {
+          p_attempt_id: attemptId
+        }
+      );
+
+      if (reviewError) throw reviewError;
+
+      const {
+        data: resultData,
+        error: resultError
+      } = await supabase
+        .from("exam_results")
+        .select("*")
+        .eq("attempt_id", attemptId)
+        .maybeSingle();
+
+      if (resultError) throw resultError;
+
+      setReview({
+        ...(data || {}),
+        result: resultData || result || {},
+      });
+
+      setStage("review");
+    } catch (err) {
+      setError(
+        err.message || "Unable to load your response review."
+      );
+    } finally {
+      setReviewLoading(false);
+    }
+  };
+
+  const getReviewQuestions = () =>
+    Array.isArray(review?.questions) ? review.questions : [];
+
+  const downloadResultPDF = () => {
+    const marks = Number(result?.marks_obtained ?? result?.marks ?? 0);
+    const correct = Number(result?.correct_answers ?? result?.correct ?? 0);
+    const wrong = Number(result?.wrong_answers ?? result?.wrong ?? 0);
+    const attempted = Number(
+      result?.attempted_questions ?? result?.attempted ?? correct + wrong
+    );
+    const total = Number(result?.total_questions ?? result?.total ?? 100);
+
+    const body = `
+      <h2>EXAMINATION RESULT</h2>
+      <div class="score">
+        <strong>${marks}/100</strong>
+        <span>TOTAL MARKS OBTAINED</span>
+      </div>
+      <table>
+        <tr><th>Candidate</th><td>My Result</td></tr>
+        <tr><th>Examination</th><td>${escapeHTML(examName)}</td></tr>
+        <tr><th>Total Questions</th><td>${total}</td></tr>
+        <tr><th>Attempted</th><td>${attempted}</td></tr>
+        <tr><th>Correct Answers</th><td>${correct}</td></tr>
+        <tr><th>Wrong Answers</th><td>${wrong}</td></tr>
+        <tr><th>Unanswered</th><td>${Math.max(0, total - attempted)}</td></tr>
+        <tr><th>Percentage</th><td>${marks}%</td></tr>
+        <tr><th>Result Status</th><td>SUBMITTED</td></tr>
+      </table>
+      <p class="muted">
+        This report is generated electronically by the Islamic Quiz 2026 Portal.
+      </p>
+    `;
+
+    printHTML(`${examName} Result`, body);
+  };
+
+  const findNextLevel = async () => {
+    if (
+      !exam?.series_id ||
+      !exam?.level_order ||
+      exam.level_order >= 6
+    ) {
+      return;
+    }
+
+    const { data, error: nextError } = await supabase
+      .from("exams")
+      .select(
+        "id, exam_name, level_name, level_order, exam_date, availability_end, status"
+      )
+      .eq("series_id", exam.series_id)
+      .eq("level_order", exam.level_order + 1)
+      .eq("status", "published")
+      .maybeSingle();
+
+    if (nextError) {
+      setError(nextError.message);
+      return;
+    }
+
+    if (data) {
+      setNextExam(data);
+    } else {
+      setError("The next level has not been published yet.");
+    }
+  };
+
+  // Download results for all six completed levels
+  const downloadAllLevelsPDF = async () => {
+    if (!exam?.series_id || exam.level_order !== 6) return;
+
+    setLoading(true);
+    setError("");
+
+    try {
+      const {
+        data: userData,
+        error: userError
+      } = await supabase.auth.getUser();
+
+      if (userError || !userData?.user) {
+        throw new Error("Please login again.");
+      }
+
+      const userId = userData.user.id;
+
+      const {
+        data: seriesExams,
+        error: examsError
+      } = await supabase
+        .from("exams")
+        .select("id, exam_name, level_name, level_order")
+        .eq("series_id", exam.series_id)
+        .order("level_order");
+
+      if (examsError) throw examsError;
+
+      const examIds = (seriesExams || []).map((item) => item.id);
+
+      if (examIds.length !== 6) {
+        throw new Error(
+          "The six-level examination series is incomplete."
+        );
+      }
+
+      const {
+        data: ownAttempts,
+        error: attemptsError
+      } = await supabase
+        .from("exam_attempts")
+        .select("id, exam_id, status")
+        .eq("candidate_id", userId)
+        .eq("status", "submitted")
+        .in("exam_id", examIds);
+
+      if (attemptsError) throw attemptsError;
+
+      const attemptByExam = new Map(
+        (ownAttempts || []).map((item) => [item.exam_id, item])
+      );
+
+      const levelRows = [];
+
+      for (const level of seriesExams || []) {
+        const ownAttempt = attemptByExam.get(level.id);
+
+        if (!ownAttempt) continue;
+
+        const {
+          data: resultData,
+          error: resultError
+        } = await supabase
+          .from("exam_results")
+          .select(
+            "total_questions, attempted_questions, correct_answers, wrong_answers, marks_obtained, result_status, published_at"
+          )
+          .eq("attempt_id", ownAttempt.id)
+          .eq("candidate_id", userId)
+          .maybeSingle();
+
+        if (resultError) throw resultError;
+
+        if (resultData) {
+          levelRows.push({
+            level,
+            result: resultData,
+          });
+        }
+      }
+
+      if (levelRows.length !== 6) {
+        throw new Error(
+          "All six level results must be available before downloading the combined report."
+        );
+      }
+
+      const totalMarks = levelRows.reduce(
+        (sum, row) =>
+          sum + Number(row.result.marks_obtained || 0),
+        0
+      );
+
+      const percentage = Math.round(
+        (totalMarks / 600) * 10000
+      ) / 100;
+
+      const body = `
+        <h2>OVERALL ACADEMIC RESULT</h2>
+
+        <div class="score">
+          <strong>${totalMarks}/600</strong>
+          <span>OVERALL SCORE · ${percentage}%</span>
+        </div>
+
+        <table>
+          <tr>
+            <th>Level</th>
+            <th>Marks</th>
+            <th>Percentage</th>
+            <th>Status</th>
+          </tr>
+
+          ${levelRows.map((row) => {
+            const r = row.result;
+            const mark = Number(r.marks_obtained || 0);
+
+            return `
+              <tr>
+                <td>${escapeHTML(
+                  row.level.level_name || row.level.exam_name
+                )}</td>
+                <td>${mark}/100</td>
+                <td>${mark}%</td>
+                <td>Completed</td>
+              </tr>
+            `;
+          }).join("")}
+        </table>
+
+        ${levelRows.map((row) => {
+          const r = row.result;
+
+          return `
+            <h2>
+              ${escapeHTML(
+                row.level.level_name || row.level.exam_name
+              )} — RESULT
+            </h2>
+
+            <div class="score">
+              <strong>${Number(r.marks_obtained || 0)}/100</strong>
+            </div>
+
+            <table>
+              <tr>
+                <th>Total Questions</th>
+                <td>${Number(r.total_questions || 100)}</td>
+              </tr>
+              <tr>
+                <th>Attempted</th>
+                <td>${Number(r.attempted_questions || 0)}</td>
+              </tr>
+              <tr>
+                <th>Correct</th>
+                <td>${Number(r.correct_answers || 0)}</td>
+              </tr>
+              <tr>
+                <th>Wrong</th>
+                <td>${Number(r.wrong_answers || 0)}</td>
+              </tr>
+            </table>
+          `;
+        }).join("")}
+      `;
+
+      printHTML(
+        "Islamic Quiz 2026 — All Level Result",
+        body
+      );
+
+    } catch (err) {
+      setError(
+        err.message || "Unable to create combined result."
+      );
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  const loadNextAndRender = async () => {
+    await findNextLevel();
   };
 
   if (stage === "instructions") {
@@ -280,7 +875,9 @@ function CandidateExam() {
         <section className="candidate-instruction-card">
           <div className="candidate-exam-brand">
             <ShieldCheck size={35} />
-            <span>MAJLISE TAHAFFUZE KHATME NUBUWWAT TRUST</span>
+            <span>
+              MAJLISE TAHAFFUZE KHATME NUBUWWAT TRUST
+            </span>
             <small>NIRMAL DIST, TG</small>
           </div>
 
@@ -316,15 +913,15 @@ function CandidateExam() {
 
             <article className="instruction-red">
               <strong>EXAMINATION DISCIPLINE</strong>
-              <p>Do not switch tabs or minimize the exam.</p>
-              <p>Leaving the exam window terminates your attempt.</p>
-              <p>Terminated attempts cannot be restarted.</p>
+              <p>First tab switch: 30-second warning.</p>
+              <p>Second tab switch: 10-second warning.</p>
+              <p>Third tab switch: immediate termination.</p>
             </article>
 
             <article className="instruction-teal">
               <strong>FINAL SUBMISSION</strong>
               <p>Submit after answering all questions.</p>
-              <p>Saved answers are submitted when time expires.</p>
+              <p>When time expires, saved answers are submitted automatically.</p>
             </article>
           </div>
 
@@ -334,18 +931,21 @@ function CandidateExam() {
               checked={agreed}
               onChange={(e) => setAgreed(e.target.checked)}
             />
+
             <span>
-              I have read and understood all instructions. I agree to follow
-              the examination rules and understand that switching tabs or
-              leaving the exam window will terminate my attempt.
+              I have read and understood all instructions.
+              I agree to follow the examination rules and understand
+              the tab-switching discipline.
             </span>
           </label>
 
-          {error && <p className="candidate-exam-error">{error}</p>}
+          {error && (
+            <p className="candidate-exam-error">{error}</p>
+          )}
 
           <button
             className="candidate-start-button"
-            disabled={!agreed || loading}
+            disabled={!agreed || loading || !exam}
             onClick={startExam}
           >
             {loading ? "PREPARING EXAM..." : "AGREE & START EXAM"}
@@ -360,12 +960,18 @@ function CandidateExam() {
       <main className="candidate-exam-page">
         <section className="candidate-end-card">
           <AlertTriangle size={55} color="#bd3c32" />
+
           <h1>EXAMINATION TERMINATED</h1>
+
           <p>
-            Your examination was terminated because the exam window was
-            switched, hidden or left.
+            Your examination was terminated because the
+            examination window discipline rules were violated.
           </p>
-          <p>Your attempt has been recorded. You cannot restart this exam.</p>
+
+          <p>
+            Your attempt has been recorded. You cannot restart this exam.
+          </p>
+
           <button onClick={() => navigate("/dashboard")}>
             Return to Dashboard
           </button>
@@ -375,39 +981,206 @@ function CandidateExam() {
   }
 
   if (stage === "result") {
+    const marks = Number(
+      result?.marks_obtained ?? result?.marks ?? 0
+    );
+
+    const correct = Number(
+      result?.correct_answers ?? result?.correct ?? 0
+    );
+
+    const wrong = Number(
+      result?.wrong_answers ?? result?.wrong ?? 0
+    );
+
+    const attempted = Number(
+      result?.attempted_questions ??
+      result?.attempted ??
+      correct + wrong
+    );
+
+    const total = Number(
+      result?.total_questions ?? result?.total ?? 100
+    );
+
+    const unanswered = total - attempted;
+
     return (
       <main className="candidate-exam-page">
-        <section className="candidate-end-card">
+        <section
+          className="candidate-end-card"
+          style={{ maxWidth: 760 }}
+        >
           <CheckCircle size={55} color="#08734e" />
+
           <h1>EXAMINATION SUBMITTED</h1>
           <p>{examName}</p>
 
           <div className="candidate-result-score">
-            <strong>{result?.marks ?? 0}/100</strong>
+            <strong>{marks}/100</strong>
             <span>YOUR SCORE</span>
           </div>
 
           <div className="candidate-result-grid">
             <div>
-              <strong>{result?.correct ?? 0}</strong>
+              <strong>{correct}</strong>
               <span>Correct</span>
             </div>
+
             <div>
-              <strong>{result?.wrong ?? 0}</strong>
+              <strong>{wrong}</strong>
               <span>Wrong</span>
             </div>
+
             <div>
-              <strong>{result?.unanswered ?? 0}</strong>
+              <strong>{Math.max(0, unanswered)}</strong>
               <span>Unanswered</span>
             </div>
           </div>
 
           {result?.automatic && (
-            <p>Time expired. Your saved answers were submitted automatically.</p>
+            <p>
+              Time expired. Your saved answers were submitted automatically.
+            </p>
           )}
 
+          {error && (
+            <p className="candidate-exam-error">{error}</p>
+          )}
+
+          <div
+            style={{
+              display: "grid",
+              gap: 10,
+              marginTop: 22
+            }}
+          >
+            <button onClick={downloadResultPDF}>
+              <Download size={17} /> Save Result PDF
+            </button>
+
+            <button
+              onClick={loadReview}
+              disabled={reviewLoading}
+            >
+              {reviewLoading ? (
+                <Loader size={17} />
+              ) : (
+                <Eye size={17} />
+              )}
+              View My Response
+            </button>
+
+            {exam?.series_id && exam.level_order < 6 && (
+              <button onClick={loadNextAndRender}>
+                <ArrowRight size={17} /> Find Next Level
+              </button>
+            )}
+
+            {exam?.series_id && exam.level_order === 6 && (
+              <button
+                onClick={downloadAllLevelsPDF}
+                disabled={loading}
+              >
+                <Download size={17} />
+                Download My All-Level Result
+              </button>
+            )}
+
+            {nextExam && (
+              <button
+                onClick={() => navigate(`/exam/${nextExam.id}`)}
+              >
+                Start {nextExam.level_name || nextExam.exam_name}
+              </button>
+            )}
+
+            <button onClick={() => navigate("/dashboard")}>
+              Back to Dashboard
+            </button>
+          </div>
+        </section>
+      </main>
+    );
+  }
+
+  if (stage === "review") {
+    const reviewResult = review?.result || {};
+    const reviewQuestions = getReviewQuestions();
+
+    return (
+      <main className="candidate-exam-page">
+        <section
+          className="candidate-end-card"
+          style={{
+            maxWidth: 950,
+            textAlign: "left"
+          }}
+        >
+          <h1>MY RESPONSE — {examName}</h1>
+
+          <div className="candidate-result-score">
+            <strong>
+              {Number(
+                reviewResult.marks_obtained ??
+                reviewResult.marks ??
+                0
+              )}/100
+            </strong>
+            <span>FINAL SCORE</span>
+          </div>
+
+          {reviewQuestions.map((q, index) => {
+            const correctAnswer = isCorrectAnswer(
+              q,
+              q.selected_answer
+            );
+
+            return (
+              <article
+                key={q.question_id}
+                style={{
+                  border: "1px solid #dce7df",
+                  borderRadius: 10,
+                  padding: 16,
+                  margin: "14px 0",
+                  textAlign: "left"
+                }}
+              >
+                <strong>
+                  Q{index + 1}. {q.question_text}
+                </strong>
+
+                <p>
+                  Your answer:{" "}
+                  <b>{q.selected_answer || "Not answered"}</b>
+                </p>
+
+                <p>
+                  Correct answer: <b>{q.correct_answer}</b>
+                </p>
+
+                <p className={correctAnswer ? "correct" : "wrong"}>
+                  {correctAnswer
+                    ? "Correct · +1 mark"
+                    : "Incorrect / Unanswered · 0 marks"}
+                </p>
+
+                {q.explanation && (
+                  <p className="muted">
+                    Explanation: {q.explanation}
+                  </p>
+                )}
+              </article>
+            );
+          })}
+
+          <button onClick={() => setStage("result")}>
+            Back to Result
+          </button>
+
           <button onClick={() => navigate("/dashboard")}>
-            Return to Dashboard
+            Back to Dashboard
           </button>
         </section>
       </main>
@@ -423,20 +1196,29 @@ function CandidateExam() {
   }
 
   const currentAnswer = answers[currentQuestion.question_id];
-  const isTrueFalse = currentQuestion.question_type === "true_false";
+
+  const isTrueFalse =
+    currentQuestion.question_type === "true_false";
+
   const options = isTrueFalse
     ? ["True", "False"]
-    : normalizeOptions(currentQuestion.options);
+    : formatOptions(currentQuestion.options);
 
   return (
     <main className="candidate-exam-page candidate-live-exam">
       <header className="candidate-live-header">
         <div>
-          <span>MAJLISE TAHAFFUZE KHATME NUBUWWAT TRUST</span>
+          <span>
+            MAJLISE TAHAFFUZE KHATME NUBUWWAT TRUST
+          </span>
           <h1>{examName}</h1>
         </div>
 
-        <div className={`candidate-timer ${secondsLeft < 300 ? "timer-warning" : ""}`}>
+        <div
+          className={`candidate-timer ${
+            secondsLeft < 300 ? "timer-warning" : ""
+          }`}
+        >
           <Clock size={20} />
           <strong>{formatTime(secondsLeft)}</strong>
         </div>
@@ -445,7 +1227,10 @@ function CandidateExam() {
       <div className="candidate-live-layout">
         <section className="candidate-question-panel">
           <div className="candidate-question-top">
-            <span>QUESTION {currentIndex + 1} OF {questions.length}</span>
+            <span>
+              QUESTION {currentIndex + 1} OF {questions.length}
+            </span>
+
             <span>
               {currentQuestion.section === "A"
                 ? "SECTION A · TRUE/FALSE"
@@ -456,7 +1241,9 @@ function CandidateExam() {
           <div className="candidate-question-progress">
             <div
               style={{
-                width: `${((currentIndex + 1) / questions.length) * 100}%`
+                width: `${
+                  ((currentIndex + 1) / questions.length) * 100
+                }%`
               }}
             />
           </div>
@@ -479,15 +1266,22 @@ function CandidateExam() {
                       ? option === "True" ? "T" : "F"
                       : String.fromCharCode(65 + index)}
                   </span>
+
                   {option}
                 </button>
               ))}
             </div>
 
-            {saving && <p className="candidate-saving">Saving your answer...</p>}
+            {saving && (
+              <p className="candidate-saving">
+                Saving your answer...
+              </p>
+            )}
           </div>
 
-          {error && <p className="candidate-exam-error">{error}</p>}
+          {error && (
+            <p className="candidate-exam-error">{error}</p>
+          )}
 
           <div className="candidate-question-actions">
             <button
@@ -520,23 +1314,42 @@ function CandidateExam() {
           <h3>QUESTION PALETTE</h3>
 
           <div className="candidate-palette-legend">
-            <span><i className="palette-green" /> Answered</span>
-            <span><i className="palette-red" /> Visited / Unanswered</span>
-            <span><i className="palette-grey" /> Not Visited</span>
-            <span><i className="palette-orange" /> Current</span>
+            <span>
+              <i className="palette-green" /> Answered
+            </span>
+
+            <span>
+              <i className="palette-red" /> Visited / Unanswered
+            </span>
+
+            <span>
+              <i className="palette-grey" /> Not Visited
+            </span>
+
+            <span>
+              <i className="palette-orange" /> Current
+            </span>
           </div>
 
           <div className="candidate-question-grid">
             {questions.map((question, index) => {
-              const answered = Boolean(answers[question.question_id]);
+              const answered = Boolean(
+                answers[question.question_id]
+              );
+
               const wasVisited = visited.includes(index);
 
               let status = "palette-grey";
 
-              if (answered) status = "palette-green";
-              else if (wasVisited) status = "palette-red";
+              if (answered) {
+                status = "palette-green";
+              } else if (wasVisited) {
+                status = "palette-red";
+              }
 
-              if (index === currentIndex) status = "palette-orange";
+              if (index === currentIndex) {
+                status = "palette-orange";
+              }
 
               return (
                 <button
@@ -551,8 +1364,12 @@ function CandidateExam() {
           </div>
 
           <div className="candidate-sidebar-summary">
-            <p>Answered: <strong>{answeredCount}</strong></p>
-            <p>Remaining: <strong>{unansweredCount}</strong></p>
+            <p>
+              Answered: <strong>{answeredCount}</strong>
+            </p>
+            <p>
+              Remaining: <strong>{unansweredCount}</strong>
+            </p>
           </div>
 
           <button
@@ -566,9 +1383,98 @@ function CandidateExam() {
       </div>
 
       <div className="candidate-exam-footer">
-        <span><ShieldCheck size={16} /> Your answers are saved securely.</span>
-        <span><LogOut size={16} /> Do not leave this examination window.</span>
+        <span>
+          <ShieldCheck size={16} />
+          Your answers are saved securely.
+        </span>
+
+        <span>
+          <LogOut size={16} />
+          Do not leave this examination window.
+        </span>
       </div>
+
+      {showViolationWarning && (
+        <div
+          style={{
+            position: "fixed",
+            inset: 0,
+            zIndex: 9999,
+            background: "rgba(12, 28, 22, 0.72)",
+            display: "grid",
+            placeItems: "center",
+            padding: 20
+          }}
+        >
+          <section
+            style={{
+              maxWidth: 460,
+              width: "100%",
+              background: "#fff",
+              color: "#173d32",
+              borderRadius: 16,
+              padding: 26,
+              textAlign: "center",
+              boxShadow: "0 18px 55px rgba(0,0,0,.25)"
+            }}
+          >
+            <AlertTriangle
+              size={42}
+              color="#bd3c32"
+            />
+
+            <h2>EXAMINATION WARNING</h2>
+
+            <p>
+              You switched away from the examination window.
+              This violation has been recorded.
+            </p>
+
+            <p>
+              Violation: <strong>{violationCount} of 3</strong>
+            </p>
+
+            {warningSeconds > 0 ? (
+              <>
+                <strong
+                  style={{
+                    display: "block",
+                    fontSize: 38,
+                    color: "#bd3c32",
+                    margin: "12px 0"
+                  }}
+                >
+                  {formatTime(warningSeconds)}
+                </strong>
+
+                <p>
+                  Return to the exam before the countdown ends.
+                  Otherwise, your attempt will be terminated.
+                </p>
+              </>
+            ) : (
+              <p>
+                Warning recorded. Please do not switch tabs again.
+              </p>
+            )}
+
+            <button
+              onClick={() => setShowViolationWarning(false)}
+              style={{
+                marginTop: 12,
+                border: 0,
+                background: "#176b50",
+                color: "#fff",
+                padding: "12px 22px",
+                borderRadius: 8,
+                cursor: "pointer"
+              }}
+            >
+              <X size={16} /> Continue Examination
+            </button>
+          </section>
+        </div>
+      )}
     </main>
   );
 }
