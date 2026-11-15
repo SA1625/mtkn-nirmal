@@ -1,7 +1,6 @@
 
 import React from "react";
 import {
-  BrowserRouter,
   Routes,
   Route,
   Navigate,
@@ -16,7 +15,6 @@ import Login from "./Login";
 import AdminLogin from "./AdminLogin";
 import AuthCallback from "./AuthCallback";
 import Success from "./Success";
-
 import Dashboard from "./Dashboard";
 import Profile from "./Profile";
 import CandidateExam from "./CandidateExam";
@@ -25,7 +23,6 @@ import Leaderboard from "./Leaderboard";
 import PerformanceAnalytics from "./PerformanceAnalytics";
 
 import ProtectedRoute from "./ProtectedRoute";
-
 import AdminDashboard from "./AdminDashboard";
 import CandidateManagement from "./CandidateManagement";
 import QuestionBank from "./QuestionBank";
@@ -38,7 +35,6 @@ import AdminManagement from "./AdminManagement";
 function AppLayout() {
   const location = useLocation();
 
-  // Full-screen examination experience
   const isExamPage = /^\/exam\/[^/]+$/.test(location.pathname);
 
   return (
@@ -183,7 +179,10 @@ function AppLayout() {
         />
 
         {/* INVALID URL */}
-        <Route path="*" element={<Navigate to="/" replace />} />
+        <Route
+          path="*"
+          element={<Navigate to="/" replace />}
+        />
       </Routes>
 
       {!isExamPage && <Footer />}
@@ -192,11 +191,7 @@ function AppLayout() {
 }
 
 function App() {
-  return (
-    <BrowserRouter>
-      <AppLayout />
-    </BrowserRouter>
-  );
+  return <AppLayout />;
 }
 
 export default App;
