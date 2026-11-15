@@ -17,6 +17,7 @@ import AdminDashboard from "./AdminDashboard";
 import CandidateManagement from "./CandidateManagement";
 import QuestionBank from "./QuestionBank";
 import QuestionImport from "./QuestionImport";
+import ExamManagement from "./ExamManagement";
 import ProtectedRoute from "./ProtectedRoute";
 
 function App() {
@@ -56,9 +57,15 @@ function App() {
           path="/admin/questions"
           element={<ProtectedRoute><QuestionBank /></ProtectedRoute>}
         />
+
         <Route
           path="/admin/questions/import"
           element={<ProtectedRoute><QuestionImport /></ProtectedRoute>}
+        />
+
+        <Route
+          path="/admin/exams"
+          element={<ProtectedRoute><ExamManagement /></ProtectedRoute>}
         />
 
         <Route path="*" element={<Navigate to="/" replace />} />

@@ -88,9 +88,10 @@ function AdminDashboard() {
     },
     {
       title: "Examination Management",
-      description: "Create and manage examinations.",
+      description: "Create, schedule and manage examinations.",
       icon: ClipboardList,
-      status: "Coming next"
+      path: "/admin/exams",
+      status: "Open Module"
     },
     {
       title: "Results & Rankings",
@@ -116,7 +117,6 @@ function AdminDashboard() {
   return (
     <main className="admin-page">
       <div className="admin-container">
-
         <div className="admin-topbar">
           <div className="admin-heading">
             <div className="admin-heading-icon">
@@ -160,9 +160,7 @@ function AdminDashboard() {
                 className="admin-module-card"
                 key={module.title}
                 onClick={() => module.path && navigate(module.path)}
-                style={{
-                  cursor: module.path ? "pointer" : "default"
-                }}
+                style={{ cursor: module.path ? "pointer" : "default" }}
               >
                 <div className="admin-module-icon">
                   <Icon size={25} />
@@ -186,7 +184,6 @@ function AdminDashboard() {
         <p className="admin-notice">
           Administrator access is subject to assigned permissions.
         </p>
-
       </div>
     </main>
   );
