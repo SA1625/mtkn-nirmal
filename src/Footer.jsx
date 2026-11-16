@@ -23,7 +23,7 @@ function Footer() {
           <Phone size={22} />
           <div>
             <h3>Contact Us</h3>
-            <p>9640463320 – 8247764213</p>
+            <p>9440933980 · 9640463320 · 9398984245</p>
           </div>
         </div>
 
