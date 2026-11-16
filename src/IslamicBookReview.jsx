@@ -1,4 +1,3 @@
-
 import { useCallback, useEffect, useMemo, useState } from "react";
 import { useNavigate } from "react-router-dom";
 import {
@@ -9,8 +8,13 @@ import {
   BookOpen,
   CheckCircle,
   Clock,
+  CheckSquare,
+  Square,
+  X,
 } from "lucide-react";
 import { supabase } from "./supabase";
+
+const DEFAULT_BATCH_ID = "c6b6585b-3590-4f06-bcf2-2eb57f029a48";
 
 const LEVELS = [
   "Foundation",
@@ -21,15 +25,12 @@ const LEVELS = [
   "Expert",
 ];
 
-const DEFAULT_BATCH_ID = "c6b6585b-3590-4f06-bcf2-2eb57f029a48";
-
 const EMPTY_EDIT = {
   question_text: "",
   answer_text: "",
   topic: "",
   difficulty: "Foundation",
   source_level: "Foundation",
-  review_status: "pending",
 };
 
 const isBookBatch = (batch) =>
@@ -43,15 +44,19 @@ export default function IslamicBookReview() {
   const [authorized, setAuthorized] = useState(false);
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
+  const [bulkProcessing, setBulkProcessing] = useState(false);
 
   const [batch, setBatch] = useState(null);
   const [items, setItems] = useState([]);
+
   const [selectedIndex, setSelectedIndex] = useState(null);
+  const [selectedIndices, setSelectedIndices] = useState([]);
   const [edit, setEdit] = useState(EMPTY_EDIT);
 
   const [search, setSearch] = useState("");
   const [topicFilter, setTopicFilter] = useState("all");
   const [statusFilter, setStatusFilter] = useState("all");
+
   const [message, setMessage] = useState("");
   const [error, setError] = useState("");
 
@@ -73,12 +78,11 @@ export default function IslamicBookReview() {
         return;
       }
 
-      const { data: profile, error: profileError } =
-        await supabase
-          .from("profiles")
-          .select("role")
-          .eq("id", user.id)
-          .single();
+      const { data: profile, error: profileError } = await supabase
+        .from("profiles")
+        .select("role")
+        .eq("id", user.id)
+        .single();
 
       if (profileError) throw profileError;
 
@@ -106,6 +110,7 @@ export default function IslamicBookReview() {
       }
 
       const extracted = data.extracted_questions;
+
       const originalItems = Array.isArray(extracted)
         ? extracted
         : Array.isArray(extracted?.items)
@@ -114,8 +119,12 @@ export default function IslamicBookReview() {
 
       setBatch(data);
       setItems(originalItems);
+      setSelectedIndices([]);
+      setSelectedIndex(null);
     } catch (err) {
-      setError(err?.message || "Unable to load original book questions.");
+      setError(
+        err?.message || "Unable to load original book questions."
+      );
     } finally {
       setLoading(false);
     }
@@ -137,15 +146,20 @@ export default function IslamicBookReview() {
 
   const filteredItems = useMemo(() => {
     return items
-      .map((item, index) => ({ ...item, _index: index }))
+      .map((item, index) => ({
+        ...item,
+        _index: index,
+      }))
       .filter((item) => {
-        const text = `${item.question_text || ""} ${
-          item.answer_text || ""
-        } ${item.topic || ""}`.toLowerCase();
+        const searchableText = `
+          ${item.question_text || ""}
+          ${item.answer_text || ""}
+          ${item.topic || ""}
+        `.toLowerCase();
 
         const matchesSearch =
           !search.trim() ||
-          text.includes(search.trim().toLowerCase());
+          searchableText.includes(search.trim().toLowerCase());
 
         const matchesTopic =
           topicFilter === "all" || item.topic === topicFilter;
@@ -164,21 +178,96 @@ export default function IslamicBookReview() {
 
   const pendingCount = items.length - reviewedCount;
 
+  const pendingFilteredItems = filteredItems.filter(
+    (item) => item.review_status !== "reviewed"
+  );
+
+  const allVisiblePendingSelected =
+    pendingFilteredItems.length > 0 &&
+    pendingFilteredItems.every((item) =>
+      selectedIndices.includes(item._index)
+    );
+
   const openItem = (index) => {
     const item = items[index];
 
+    if (!item) return;
+
     setSelectedIndex(index);
+
     setEdit({
       question_text: item.question_text || "",
       answer_text: item.answer_text || "",
       topic: item.topic || "",
       difficulty: item.difficulty || "Foundation",
       source_level: item.source_level || "Foundation",
-      review_status: item.review_status || "pending",
     });
 
     setMessage("");
     setError("");
+  };
+
+  const toggleSelectItem = (index) => {
+    setSelectedIndices((previous) =>
+      previous.includes(index)
+        ? previous.filter((value) => value !== index)
+        : [...previous, index]
+    );
+  };
+
+  const toggleSelectAll = () => {
+    if (allVisiblePendingSelected) {
+      setSelectedIndices((previous) =>
+        previous.filter(
+          (index) =>
+            !pendingFilteredItems.some(
+              (item) => item._index === index
+            )
+        )
+      );
+    } else {
+      setSelectedIndices((previous) => [
+        ...new Set([
+          ...previous,
+          ...pendingFilteredItems.map((item) => item._index),
+        ]),
+      ]);
+    }
+  };
+
+  const clearSelection = () => {
+    setSelectedIndices([]);
+  };
+
+  const saveItemsToDatabase = async (updatedItems) => {
+    if (!batch) {
+      throw new Error("Book import batch is not loaded.");
+    }
+
+    const oldData = batch.extracted_questions;
+
+    const updatedJSON = Array.isArray(oldData)
+      ? updatedItems
+      : {
+          ...(oldData || {}),
+          items: updatedItems,
+        };
+
+    const { error: updateError } = await supabase
+      .from("question_import_batches")
+      .update({
+        extracted_questions: updatedJSON,
+      })
+      .eq("id", batch.id);
+
+    if (updateError) throw updateError;
+
+    setItems(updatedItems);
+
+    setBatch((previous) => ({
+      ...previous,
+      extracted_questions: updatedJSON,
+    }));
   };
 
   const saveItem = async (markReviewed = false) => {
@@ -223,36 +312,16 @@ export default function IslamicBookReview() {
         topic: edit.topic.trim(),
         difficulty: edit.difficulty,
         source_level: edit.source_level,
-        review_status: markReviewed ? "reviewed" : "pending",
+        review_status: markReviewed
+          ? "reviewed"
+          : updatedItems[selectedIndex].review_status || "pending",
         reviewed_at: markReviewed
           ? new Date().toISOString()
-          : null,
+          : updatedItems[selectedIndex].reviewed_at || null,
         source_type: "original_book",
       };
 
-      const oldData = batch.extracted_questions;
-
-      const updatedJSON = Array.isArray(oldData)
-        ? updatedItems
-        : {
-            ...(oldData || {}),
-            items: updatedItems,
-          };
-
-      const { error: updateError } = await supabase
-        .from("question_import_batches")
-        .update({
-          extracted_questions: updatedJSON,
-        })
-        .eq("id", batch.id);
-
-      if (updateError) throw updateError;
-
-      setItems(updatedItems);
-      setBatch({
-        ...batch,
-        extracted_questions: updatedJSON,
-      });
+      await saveItemsToDatabase(updatedItems);
 
       setMessage(
         markReviewed
@@ -282,6 +351,61 @@ export default function IslamicBookReview() {
     }
   };
 
+  const bulkMarkReviewed = async () => {
+    if (!batch) return;
+
+    const indexes = selectedIndices.filter(
+      (index) =>
+        items[index] &&
+        items[index].review_status !== "reviewed"
+    );
+
+    if (!indexes.length) {
+      setError("Select at least one pending question first.");
+      return;
+    }
+
+    const confirmed = window.confirm(
+      `Mark ${indexes.length} original Q&A pair(s) as reviewed?`
+    );
+
+    if (!confirmed) return;
+
+    setBulkProcessing(true);
+    setError("");
+    setMessage("");
+
+    try {
+      const reviewedAt = new Date().toISOString();
+      const selectedSet = new Set(indexes);
+
+      const updatedItems = items.map((item, index) => {
+        if (!selectedSet.has(index)) return item;
+
+        return {
+          ...item,
+          review_status: "reviewed",
+          reviewed_at: reviewedAt,
+          source_type: "original_book",
+        };
+      });
+
+      await saveItemsToDatabase(updatedItems);
+
+      setSelectedIndices([]);
+
+      setMessage(
+        `${indexes.length} original Q&A pair(s) marked as reviewed successfully.`
+      );
+    } catch (err) {
+      setError(
+        err?.message || "Bulk review update failed."
+      );
+    } finally {
+      setBulkProcessing(false);
+    }
+  };
+
   if (loading) {
     return (
       <main style={styles.center}>
@@ -298,22 +422,31 @@ export default function IslamicBookReview() {
       <header style={styles.header}>
         <button
           style={styles.backButton}
-          onClick={() => navigate(-1)}
+          onClick={() => navigate("/admin")}
+          type="button"
         >
-          <ArrowLeft size={18} /> Back
+          <ArrowLeft size={18} />
+          Back to Dashboard
         </button>
 
-        <div>
+        <div style={styles.headerTitle}>
           <h1 style={styles.heading}>
             Islamic Book Review Dashboard
           </h1>
+
           <p style={styles.subheading}>
             Review original Sawal and Jawab extracted from the book.
           </p>
         </div>
 
-        <button style={styles.refresh} onClick={loadData}>
-          <RefreshCw size={16} /> Refresh
+        <button
+          style={styles.refresh}
+          onClick={loadData}
+          disabled={loading || saving || bulkProcessing}
+          type="button"
+        >
+          <RefreshCw size={16} />
+          Refresh
         </button>
       </header>
 
@@ -324,13 +457,13 @@ export default function IslamicBookReview() {
         <div style={styles.stat}>
           <BookOpen size={21} />
           <strong>{items.length}</strong>
-          <span>Total original Q&A</span>
+          <span>Total Original Q&A</span>
         </div>
 
         <div style={styles.stat}>
           <Clock size={21} />
           <strong>{pendingCount}</strong>
-          <span>Pending review</span>
+          <span>Pending Review</span>
         </div>
 
         <div style={styles.stat}>
@@ -341,7 +474,8 @@ export default function IslamicBookReview() {
       </section>
 
       <section style={styles.batch}>
-        <strong>Source PDF:</strong> {batch?.file_name || "Islamic book"}
+        <strong>Source PDF:</strong>{" "}
+        {batch?.file_name || "Islamic book"}
         <br />
         <strong>Batch ID:</strong> {batch?.id}
       </section>
@@ -349,20 +483,22 @@ export default function IslamicBookReview() {
       <section style={styles.filters}>
         <div style={styles.searchBox}>
           <Search size={18} />
+
           <input
             style={styles.searchInput}
             placeholder="Search question, answer or topic..."
             value={search}
-            onChange={(e) => setSearch(e.target.value)}
+            onChange={(event) => setSearch(event.target.value)}
           />
         </div>
 
         <select
           style={styles.select}
           value={topicFilter}
-          onChange={(e) => setTopicFilter(e.target.value)}
+          onChange={(event) => setTopicFilter(event.target.value)}
         >
-          <option value="all">All topics</option>
+          <option value="all">All Topics</option>
+
           {topics.map((topic) => (
             <option key={topic} value={topic}>
               {topic}
@@ -373,9 +509,9 @@ export default function IslamicBookReview() {
         <select
           style={styles.select}
           value={statusFilter}
-          onChange={(e) => setStatusFilter(e.target.value)}
+          onChange={(event) => setStatusFilter(event.target.value)}
         >
-          <option value="all">All statuses</option>
+          <option value="all">All Statuses</option>
           <option value="pending">Pending</option>
           <option value="reviewed">Reviewed</option>
         </select>
@@ -383,55 +519,129 @@ export default function IslamicBookReview() {
 
       <div style={styles.layout}>
         <section style={styles.list}>
-          <h2 style={styles.sectionHeading}>
-            Original Questions ({filteredItems.length})
-          </h2>
+          <div style={styles.listHeader}>
+            <div>
+              <h2 style={styles.sectionHeading}>
+                Original Questions ({filteredItems.length})
+              </h2>
+
+              <p style={styles.listSubheading}>
+                Select questions to mark them reviewed.
+              </p>
+            </div>
+          </div>
+
+          <div style={styles.bulkToolbar}>
+            <label style={styles.selectAllLabel}>
+              <input
+                type="checkbox"
+                checked={allVisiblePendingSelected}
+                onChange={toggleSelectAll}
+                disabled={
+                  pendingFilteredItems.length === 0 ||
+                  bulkProcessing
+                }
+              />
+              Select All Pending
+            </label>
+
+            <span style={styles.selectedCount}>
+              {selectedIndices.length} selected
+            </span>
+
+            <button
+              type="button"
+              style={styles.bulkButton}
+              onClick={bulkMarkReviewed}
+              disabled={
+                selectedIndices.length === 0 ||
+                bulkProcessing ||
+                saving
+              }
+            >
+              <CheckSquare size={16} />
+              {bulkProcessing
+                ? "Processing..."
+                : "Mark Selected Reviewed"}
+            </button>
+
+            <button
+              type="button"
+              style={styles.clearButton}
+              onClick={clearSelection}
+              disabled={
+                selectedIndices.length === 0 || bulkProcessing
+              }
+            >
+              <X size={15} />
+              Clear
+            </button>
+          </div>
 
           {filteredItems.map((item) => (
-            <button
+            <div
               key={item._index}
-              onClick={() => openItem(item._index)}
-              style={{
-                ...styles.questionCard,
-                ...(selectedIndex === item._index
-                  ? styles.selectedCard
-                  : {}),
-              }}
+              style={styles.questionRow}
             >
-              <div style={styles.cardTop}>
-                <strong>Question #{item._index + 1}</strong>
-                <span
-                  style={{
-                    ...styles.status,
-                    background:
-                      item.review_status === "reviewed"
-                        ? "#dcfce7"
-                        : "#fef3c7",
-                    color:
-                      item.review_status === "reviewed"
-                        ? "#166534"
-                        : "#92400e",
-                  }}
-                >
-                  {item.review_status || "pending"}
-                </span>
-              </div>
+              <input
+                type="checkbox"
+                checked={selectedIndices.includes(item._index)}
+                onChange={() => toggleSelectItem(item._index)}
+                disabled={
+                  item.review_status === "reviewed" ||
+                  bulkProcessing
+                }
+                aria-label={`Select question ${item._index + 1}`}
+              />
 
-              <p style={styles.cardQuestion}>
-                {item.question_text || "Question text unavailable"}
-              </p>
+              <button
+                type="button"
+                onClick={() => openItem(item._index)}
+                style={{
+                  ...styles.questionCard,
+                  ...(selectedIndex === item._index
+                    ? styles.selectedCard
+                    : {}),
+                }}
+              >
+                <div style={styles.cardTop}>
+                  <strong>Question #{item._index + 1}</strong>
 
-              <small>
-                {item.topic || "Topic not assigned"} ·{" "}
-                {item.source_page
-                  ? `Page ${item.source_page}`
-                  : "Page not recorded"}
-              </small>
-            </button>
+                  <span
+                    style={{
+                      ...styles.status,
+                      background:
+                        item.review_status === "reviewed"
+                          ? "#dcfce7"
+                          : "#fef3c7",
+                      color:
+                        item.review_status === "reviewed"
+                          ? "#166534"
+                          : "#92400e",
+                    }}
+                  >
+                    {item.review_status || "pending"}
+                  </span>
+                </div>
+
+                <p style={styles.cardQuestion}>
+                  {item.question_text || "Question text unavailable"}
+                </p>
+
+                <small style={styles.cardMeta}>
+                  {item.topic || "Topic not assigned"} ·{" "}
+                  {item.source_page
+                    ? `Page ${item.source_page}`
+                    : "Page not recorded"}
+                </small>
+              </button>
+            </div>
           ))}
 
           {filteredItems.length === 0 && (
-            <p>No questions match your filters.</p>
+            <p style={styles.emptyMessage}>
+              No questions match your filters.
+            </p>
           )}
         </section>
 
@@ -446,82 +656,117 @@ export default function IslamicBookReview() {
             </div>
           ) : (
             <>
-              <h2 style={styles.sectionHeading}>
-                Edit Original Q&A #{selectedIndex + 1}
-              </h2>
+              <div style={styles.editorHeader}>
+                <h2 style={styles.sectionHeading}>
+                  Edit Original Q&A #{selectedIndex + 1}
+                </h2>
 
-              <label style={styles.label}>Original Question</label>
+                <button
+                  type="button"
+                  style={styles.closeButton}
+                  onClick={() => setSelectedIndex(null)}
+                  aria-label="Close editor"
+                >
+                  <X size={18} />
+                </button>
+              </div>
+
+              <label style={styles.label}>
+                Original Question
+              </label>
+
               <textarea
                 style={styles.textarea}
                 rows={5}
                 value={edit.question_text}
-                onChange={(e) =>
+                onChange={(event) =>
                   setEdit({
                     ...edit,
-                    question_text: e.target.value,
+                    question_text: event.target.value,
                   })
                 }
               />
 
-              <label style={styles.label}>Original Answer</label>
+              <label style={styles.label}>
+                Original Answer
+              </label>
+
               <textarea
                 style={styles.textarea}
                 rows={8}
                 value={edit.answer_text}
-                onChange={(e) =>
+                onChange={(event) =>
                   setEdit({
                     ...edit,
-                    answer_text: e.target.value,
+                    answer_text: event.target.value,
                   })
                 }
               />
 
               <label style={styles.label}>Topic</label>
+
               <input
                 style={styles.input}
                 value={edit.topic}
-                onChange={(e) =>
-                  setEdit({ ...edit, topic: e.target.value })
+                onChange={(event) =>
+                  setEdit({
+                    ...edit,
+                    topic: event.target.value,
+                  })
                 }
                 placeholder="Enter the actual book topic"
               />
 
               <label style={styles.label}>Difficulty</label>
+
               <select
                 style={styles.input}
                 value={edit.difficulty}
-                onChange={(e) =>
-                  setEdit({ ...edit, difficulty: e.target.value })
+                onChange={(event) =>
+                  setEdit({
+                    ...edit,
+                    difficulty: event.target.value,
+                  })
                 }
               >
                 {LEVELS.map((level) => (
-                  <option key={level}>{level}</option>
+                  <option key={level} value={level}>
+                    {level}
+                  </option>
                 ))}
               </select>
 
               <label style={styles.label}>Source Level</label>
+
               <select
                 style={styles.input}
                 value={edit.source_level}
-                onChange={(e) =>
-                  setEdit({ ...edit, source_level: e.target.value })
+                onChange={(event) =>
+                  setEdit({
+                    ...edit,
+                    source_level: event.target.value,
+                  })
                 }
               >
                 {LEVELS.map((level) => (
-                  <option key={level}>{level}</option>
+                  <option key={level} value={level}>
+                    {level}
+                  </option>
                 ))}
               </select>
 
               <div style={styles.note}>
-                The original book answer is preserved. Saving here only
-                updates the source review record; it does not publish a
-                question to the final quiz bank.
+                <strong>Important:</strong> The original book answer is
+                preserved. Saving or marking reviewed only updates the
+                source review record. It does not publish a question
+                to the final quiz bank or convert it into MCQ/True-False.
               </div>
 
               <div style={styles.actions}>
                 <button
+                  type="button"
                   style={styles.saveButton}
-                  disabled={saving}
+                  disabled={saving || bulkProcessing}
                   onClick={() => saveItem(false)}
                 >
                   <Save size={17} />
@@ -529,8 +774,9 @@ export default function IslamicBookReview() {
                 </button>
 
                 <button
+                  type="button"
                   style={styles.reviewButton}
-                  disabled={saving}
+                  disabled={saving || bulkProcessing}
                   onClick={() => saveItem(true)}
                 >
                   <CheckCircle size={17} />
@@ -552,6 +798,7 @@ const styles = {
     background: "#f5f7fb",
     color: "#172033",
     fontFamily: "Arial, sans-serif",
+    boxSizing: "border-box",
   },
   center: {
     minHeight: "60vh",
@@ -566,6 +813,9 @@ const styles = {
     flexWrap: "wrap",
     marginBottom: "22px",
   },
+  headerTitle: {
+    flex: "1 1 260px",
+  },
   backButton: {
     display: "flex",
     gap: "7px",
@@ -576,10 +826,15 @@ const styles = {
     background: "#fff",
     cursor: "pointer",
   },
-  heading: { margin: 0, fontSize: "25px" },
-  subheading: { margin: "6px 0 0", color: "#64748b" },
+  heading: {
+    margin: 0,
+    fontSize: "25px",
+  },
+  subheading: {
+    margin: "6px 0 0",
+    color: "#64748b",
+  },
   refresh: {
-    marginLeft: "auto",
     display: "flex",
     gap: "7px",
     alignItems: "center",
@@ -633,6 +888,7 @@ const styles = {
     padding: "12px 0",
     border: 0,
     outline: 0,
+    minWidth: 0,
   },
   select: {
     minWidth: "160px",
@@ -651,16 +907,83 @@ const styles = {
     padding: "16px",
     background: "#fff",
     borderRadius: "12px",
-    maxHeight: "75vh",
+    maxHeight: "78vh",
     overflowY: "auto",
+    minWidth: 0,
   },
-  sectionHeading: { margin: "0 0 15px", fontSize: "18px" },
+  listHeader: {
+    marginBottom: "12px",
+  },
+  sectionHeading: {
+    margin: "0 0 8px",
+    fontSize: "18px",
+  },
+  listSubheading: {
+    margin: 0,
+    color: "#64748b",
+    fontSize: "12px",
+  },
+  bulkToolbar: {
+    display: "flex",
+    alignItems: "center",
+    flexWrap: "wrap",
+    gap: "9px",
+    padding: "12px",
+    marginBottom: "14px",
+    border: "1px solid #e2e8f0",
+    borderRadius: "9px",
+    background: "#f8fafc",
+  },
+  selectAllLabel: {
+    display: "flex",
+    alignItems: "center",
+    gap: "7px",
+    fontSize: "12px",
+    fontWeight: 700,
+    cursor: "pointer",
+  },
+  selectedCount: {
+    color: "#475569",
+    fontSize: "12px",
+    marginLeft: "auto",
+  },
+  bulkButton: {
+    display: "flex",
+    alignItems: "center",
+    gap: "7px",
+    padding: "9px 11px",
+    border: 0,
+    borderRadius: "8px",
+    background: "#15803d",
+    color: "#fff",
+    fontSize: "12px",
+    fontWeight: 700,
+    cursor: "pointer",
+  },
+  clearButton: {
+    display: "flex",
+    alignItems: "center",
+    gap: "5px",
+    padding: "9px 10px",
+    border: "1px solid #cbd5e1",
+    borderRadius: "8px",
+    background: "#fff",
+    color: "#475569",
+    fontSize: "12px",
+    cursor: "pointer",
+  },
+  questionRow: {
+    display: "flex",
+    alignItems: "flex-start",
+    gap: "10px",
+    marginBottom: "9px",
+  },
   questionCard: {
     display: "block",
-    width: "100%",
+    flex: 1,
+    minWidth: 0,
     textAlign: "left",
     padding: "13px",
-    marginBottom: "9px",
     border: "1px solid #e2e8f0",
     borderRadius: "9px",
     background: "#fff",
@@ -681,17 +1004,38 @@ const styles = {
     borderRadius: "20px",
     fontSize: "11px",
     textTransform: "uppercase",
+    whiteSpace: "nowrap",
   },
   cardQuestion: {
     lineHeight: 1.5,
     margin: "10px 0",
     color: "#334155",
   },
+  cardMeta: {
+    color: "#64748b",
+  },
   editor: {
     padding: "20px",
     background: "#fff",
     borderRadius: "12px",
     boxShadow: "0 2px 8px #0f172a0a",
+    minWidth: 0,
+  },
+  editorHeader: {
+    display: "flex",
+    alignItems: "center",
+    justifyContent: "space-between",
+    gap: "12px",
+  },
+  closeButton: {
+    display: "grid",
+    placeItems: "center",
+    width: "34px",
+    height: "34px",
+    border: "1px solid #dbe2ed",
+    borderRadius: "8px",
+    background: "#fff",
+    cursor: "pointer",
   },
   empty: {
     minHeight: "300px",
@@ -700,6 +1044,11 @@ const styles = {
     justifyItems: "center",
     color: "#64748b",
     textAlign: "center",
+  },
+  emptyMessage: {
+    color: "#64748b",
+    textAlign: "center",
+    padding: "20px",
   },
   label: {
     display: "block",

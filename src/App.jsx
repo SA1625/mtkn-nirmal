@@ -1,4 +1,3 @@
-
 import React from "react";
 import {
   Routes,
@@ -40,10 +39,8 @@ import AdminManagement from "./AdminManagement";
 function AppLayout() {
   const location = useLocation();
 
-  // Hide Header and Footer only on candidate exam page.
-  const isExamPage = /^\/exam\/[^/]+$/.test(
-    location.pathname
-  );
+  // Hide Header and Footer only on the candidate exam page.
+  const isExamPage = /^\/exam\/[^/]+$/.test(location.pathname);
 
   return (
     <>
@@ -51,22 +48,14 @@ function AppLayout() {
 
       <Routes>
         {/* PUBLIC PAGES */}
-
         <Route path="/" element={<Welcome />} />
-
         <Route path="/register" element={<Register />} />
-
         <Route path="/login" element={<Login />} />
-
         <Route path="/admin-login" element={<AdminLogin />} />
-
         <Route path="/auth/callback" element={<AuthCallback />} />
-
         <Route path="/success" element={<Success />} />
 
-
         {/* CANDIDATE PAGES */}
-
         <Route
           path="/dashboard"
           element={
@@ -121,9 +110,7 @@ function AppLayout() {
           }
         />
 
-
         {/* ADMIN PAGES */}
-
         <Route
           path="/admin"
           element={
@@ -205,14 +192,8 @@ function AppLayout() {
           }
         />
 
-
         {/* INVALID URL */}
-
-        <Route
-          path="*"
-          element={<Navigate to="/" replace />}
-        />
-
+        <Route path="*" element={<Navigate to="/" replace />} />
       </Routes>
 
       {!isExamPage && <Footer />}
