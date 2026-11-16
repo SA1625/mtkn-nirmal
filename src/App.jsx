@@ -4,17 +4,19 @@ import {
   Routes,
   Route,
   Navigate,
-  useLocation
+  useLocation,
 } from "react-router-dom";
 
 import Header from "./Header";
 import Footer from "./Footer";
+
 import Welcome from "./Welcome";
 import Register from "./Register";
 import Login from "./Login";
 import AdminLogin from "./AdminLogin";
 import AuthCallback from "./AuthCallback";
 import Success from "./Success";
+
 import Dashboard from "./Dashboard";
 import Profile from "./Profile";
 import CandidateExam from "./CandidateExam";
@@ -23,11 +25,14 @@ import Leaderboard from "./Leaderboard";
 import PerformanceAnalytics from "./PerformanceAnalytics";
 
 import ProtectedRoute from "./ProtectedRoute";
+
 import AdminDashboard from "./AdminDashboard";
 import CandidateManagement from "./CandidateManagement";
 import QuestionBank from "./QuestionBank";
 import QuestionImport from "./QuestionImport";
 import QuestionReview from "./QuestionReview";
+import IslamicBookReview from "./IslamicBookReview";
+
 import ExamManagement from "./ExamManagement";
 import AdminResults from "./AdminResults";
 import AdminManagement from "./AdminManagement";
@@ -35,7 +40,10 @@ import AdminManagement from "./AdminManagement";
 function AppLayout() {
   const location = useLocation();
 
-  const isExamPage = /^\/exam\/[^/]+$/.test(location.pathname);
+  // Hide Header and Footer only on candidate exam page.
+  const isExamPage = /^\/exam\/[^/]+$/.test(
+    location.pathname
+  );
 
   return (
     <>
@@ -43,14 +51,22 @@ function AppLayout() {
 
       <Routes>
         {/* PUBLIC PAGES */}
+
         <Route path="/" element={<Welcome />} />
+
         <Route path="/register" element={<Register />} />
+
         <Route path="/login" element={<Login />} />
+
         <Route path="/admin-login" element={<AdminLogin />} />
+
         <Route path="/auth/callback" element={<AuthCallback />} />
+
         <Route path="/success" element={<Success />} />
 
+
         {/* CANDIDATE PAGES */}
+
         <Route
           path="/dashboard"
           element={
@@ -105,7 +121,9 @@ function AppLayout() {
           }
         />
 
+
         {/* ADMIN PAGES */}
+
         <Route
           path="/admin"
           element={
@@ -152,6 +170,15 @@ function AppLayout() {
         />
 
         <Route
+          path="/admin/islamic-book-review"
+          element={
+            <ProtectedRoute>
+              <IslamicBookReview />
+            </ProtectedRoute>
+          }
+        />
+
+        <Route
           path="/admin/exams"
           element={
             <ProtectedRoute>
@@ -178,11 +205,14 @@ function AppLayout() {
           }
         />
 
+
         {/* INVALID URL */}
+
         <Route
           path="*"
           element={<Navigate to="/" replace />}
         />
+
       </Routes>
 
       {!isExamPage && <Footer />}
