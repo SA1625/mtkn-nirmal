@@ -1,3 +1,4 @@
+
 import { useState } from "react";
 import { supabase } from "./supabase";
 import { createWorker } from "tesseract.js";
@@ -11,13 +12,13 @@ const MAX_PDF_SIZE = 25 * 1024 * 1024;
 const MAX_GK_OCR_LENGTH = 120000;
 const MAX_BOOK_OCR_LENGTH = 600000;
 
+const EXISTING_ISLAMIC_BATCH =
+  "c6b6585b-3590-4f06-bcf2-2eb57f029a48";
+
 function getSafeFileName(name) {
   return name.replace(/[^a-zA-Z0-9._-]/g, "_");
 }
 
-/**
- * Extract one side of a two-page book spread.
- */
 function getSideText(items, side, pageWidth) {
   const middle = pageWidth / 2;
 
@@ -52,8 +53,7 @@ function getSideText(items, side, pageWidth) {
   return lines
     .sort((a, b) => b.y - a.y)
     .map((line) =>
-      line.items
-        .sort((a, b) => a.x - b.x)
+      line.items.sort((a, b) => a.x - b.x)
         .map((item) => item.text)
         .join(" ")
     )
@@ -61,10 +61,6 @@ function getSideText(items, side, pageWidth) {
     .trim();
 }
 
-/**
- * General Knowledge PDFs are usually single-page layouts.
- * Preserve their original PDF.js reading order.
- */
 function getFullPageText(items) {
   return (items || [])
     .map((item) => {
@@ -78,8 +74,8 @@ function getFullPageText(items) {
     .trim();
 }
 
-async function recognizeFullPage(worker, sourceCanvas) {
-  const result = await worker.recognize(sourceCanvas);
+async function recognizeFullPage(worker, canvas) {
+  const result = await worker.recognize(canvas);
   return result?.data?.text || "";
 }
 
@@ -88,9 +84,7 @@ async function recognizeHalf(worker, sourceCanvas, side) {
   const canvas = document.createElement("canvas");
   const context = canvas.getContext("2d");
 
-  if (!context) {
-    throw new Error("Unable to create OCR canvas.");
-  }
+  if (!context) throw new Error("Unable to create OCR canvas.");
 
   canvas.width =
     side === "left" ? halfWidth : sourceCanvas.width - halfWidth;
@@ -120,9 +114,9 @@ async function recognizeHalf(worker, sourceCanvas, side) {
 async function getAIErrorMessage(error) {
   try {
     if (error?.context && typeof error.context.json === "function") {
-      const responseData = await error.context.json();
-      if (responseData?.error) return responseData.error;
-      if (responseData?.message) return responseData.message;
+      const data = await error.context.json();
+      if (data?.error) return data.error;
+      if (data?.message) return data.message;
     }
   } catch {
     // Use the normal error message.
@@ -138,9 +132,14 @@ export default function QuestionImport() {
   const [progress, setProgress] = useState(0);
   const [message, setMessage] = useState("");
   const [processing, setProcessing] = useState(false);
+  const [extracting, setExtracting] = useState(false);
   const [preview, setPreview] = useState("");
   const [pageInfo, setPageInfo] = useState("");
   const [stage, setStage] = useState("");
+  const [savedBatchId, setSavedBatchId] = useState(
+    EXISTING_ISLAMIC_BATCH
+  );
+  const [extractionProgress, setExtractionProgress] = useState("");
 
   const isBookMode = importType === "islamic_book";
 
@@ -150,7 +149,99 @@ export default function QuestionImport() {
     setProgress(0);
     setPageInfo("");
     setStage("");
+    setExtractionProgress("");
   };
+
+  // -------------------------------------------------------
+  // ORIGINAL ISLAMIC BOOK Q&A EXTRACTION
+  // -------------------------------------------------------
+
+  const extractOriginalQA = async () => {
+    if (!savedBatchId.trim()) {
+      setMessage("Please enter the Islamic book batch ID.");
+      return;
+    }
+
+    if (!window.confirm(
+      "Start or resume original Sawal/Jawab extraction from the saved Islamic book OCR?"
+    )) {
+      return;
+    }
+
+    setExtracting(true);
+    setMessage("");
+    setExtractionProgress("");
+    setStage("Starting original book extraction");
+
+    try {
+      let chunkIndex = 0;
+      let finished = false;
+      let totalExtracted = 0;
+      let totalChunks = 0;
+
+      while (!finished) {
+        setStage(`Extracting original book section ${chunkIndex + 1}`);
+
+        const { data, error } = await supabase.functions.invoke(
+          "extract-islamic-book-qa",
+          {
+            body: {
+              batch_id: savedBatchId.trim(),
+              chunk_index: chunkIndex,
+            },
+          }
+        );
+
+        if (error) {
+          throw new Error(await getAIErrorMessage(error));
+        }
+
+        if (!data || data.success === false) {
+          throw new Error(
+            data?.error || "Original book extraction failed."
+          );
+        }
+
+        totalChunks = data.total_chunks || totalChunks;
+        totalExtracted = data.extracted_count ?? totalExtracted;
+        finished = Boolean(data.complete);
+
+        setExtractionProgress(
+          `Completed ${data.completed_chunks ?? chunkIndex + 1} of ${totalChunks} sections · ${totalExtracted} original Q&A pairs saved`
+        );
+
+        setProgress(
+          totalChunks
+            ? Math.round(
+                ((data.completed_chunks ?? chunkIndex + 1) /
+                  totalChunks) * 100
+              )
+            : 0
+        );
+
+        if (!finished) {
+          chunkIndex += 1;
+        }
+      }
+
+      setStage("Original extraction completed");
+      setMessage(
+        `Success! ${totalExtracted} original Sawal/Jawab pairs have been saved for Admin review.`
+      );
+    } catch (error) {
+      console.error("Original Q&A extraction error:", error);
+      setStage("Extraction paused — safe to resume");
+      setMessage(
+        `Extraction paused: ${error?.message || "Unknown error"}. Press Resume Extraction to continue.`
+      );
+    } finally {
+      setExtracting(false);
+    }
+  };
+
+  // -------------------------------------------------------
+  // EXISTING PDF IMPORT WORKFLOW
+  // -------------------------------------------------------
 
   const startImport = async () => {
     if (!file) {
@@ -189,24 +280,15 @@ export default function QuestionImport() {
       : "IMPORT_TYPE=GENERAL_KNOWLEDGE";
 
     try {
-      // 1. Verify login and administrator role.
-      const {
-        data: userData,
-        error: userError,
-      } = await supabase.auth.getUser();
+      const { data: userData, error: userError } =
+        await supabase.auth.getUser();
 
       if (userError) throw userError;
 
       const user = userData?.user;
+      if (!user) throw new Error("Please login again.");
 
-      if (!user) {
-        throw new Error("Please login again.");
-      }
-
-      const {
-        data: profile,
-        error: profileError,
-      } = await supabase
+      const { data: profile, error: profileError } = await supabase
         .from("profiles")
         .select("role")
         .eq("id", user.id)
@@ -218,7 +300,6 @@ export default function QuestionImport() {
         throw new Error("Only an Admin or Super Admin can import PDFs.");
       }
 
-      // 2. Upload the original PDF.
       setStage("Uploading original PDF");
 
       uploadedFilePath =
@@ -233,17 +314,13 @@ export default function QuestionImport() {
 
       if (uploadError) throw uploadError;
 
-      // 3. Create import batch.
       setStage("Creating import batch");
 
       const initialNotes = isBookMode
         ? `${importTag}; Original Sawal/Jawab extraction pending.`
         : `${importTag}; General Knowledge AI draft generation.`;
 
-      const {
-        data: batch,
-        error: batchError,
-      } = await supabase
+      const { data: batch, error: batchError } = await supabase
         .from("question_import_batches")
         .insert({
           file_name: file.name,
@@ -260,7 +337,10 @@ export default function QuestionImport() {
 
       batchId = batch.id;
 
-      // 4. Read PDF.
+      if (isBookMode) {
+        setSavedBatchId(batch.id);
+      }
+
       setStage("Reading PDF");
 
       const pdfData = new Uint8Array(await file.arrayBuffer());
@@ -284,7 +364,6 @@ export default function QuestionImport() {
 
       let completeText = "";
 
-      // 5. Extract each PDF page.
       for (
         let pageNumber = 1;
         pageNumber <= pdfDocument.numPages;
@@ -303,7 +382,6 @@ export default function QuestionImport() {
           let pageText = "";
 
           if (isBookMode) {
-            // Islamic book PDF: treat each PDF page as a two-page spread.
             const textViewport = page.getViewport({ scale: 1 });
 
             let leftText = getSideText(
@@ -329,7 +407,7 @@ export default function QuestionImport() {
                 worker = await createWorker(language);
               }
 
-              const renderViewport = page.getViewport({ scale: 2 });
+              const viewport = page.getViewport({ scale: 2 });
               const canvas = document.createElement("canvas");
               const context = canvas.getContext("2d");
 
@@ -337,29 +415,21 @@ export default function QuestionImport() {
                 throw new Error("Unable to create PDF rendering canvas.");
               }
 
-              canvas.width = Math.ceil(renderViewport.width);
-              canvas.height = Math.ceil(renderViewport.height);
+              canvas.width = Math.ceil(viewport.width);
+              canvas.height = Math.ceil(viewport.height);
 
               try {
                 await page.render({
                   canvasContext: context,
-                  viewport: renderViewport,
+                  viewport,
                 }).promise;
 
                 if (needsLeftOCR) {
-                  leftText = await recognizeHalf(
-                    worker,
-                    canvas,
-                    "left"
-                  );
+                  leftText = await recognizeHalf(worker, canvas, "left");
                 }
 
                 if (needsRightOCR) {
-                  rightText = await recognizeHalf(
-                    worker,
-                    canvas,
-                    "right"
-                  );
+                  rightText = await recognizeHalf(worker, canvas, "right");
                 }
               } finally {
                 canvas.width = 0;
@@ -373,7 +443,6 @@ export default function QuestionImport() {
               `\n--- PDF PAGE ${pageNumber} RIGHT BOOK PAGE ---\n` +
               `${rightText}`;
           } else {
-            // General Knowledge: extract the whole page, never split it.
             let fullPageText = getFullPageText(items);
 
             if (fullPageText.length < 40) {
@@ -384,7 +453,7 @@ export default function QuestionImport() {
                 worker = await createWorker(language);
               }
 
-              const renderViewport = page.getViewport({ scale: 2 });
+              const viewport = page.getViewport({ scale: 2 });
               const canvas = document.createElement("canvas");
               const context = canvas.getContext("2d");
 
@@ -392,13 +461,13 @@ export default function QuestionImport() {
                 throw new Error("Unable to create PDF rendering canvas.");
               }
 
-              canvas.width = Math.ceil(renderViewport.width);
-              canvas.height = Math.ceil(renderViewport.height);
+              canvas.width = Math.ceil(viewport.width);
+              canvas.height = Math.ceil(viewport.height);
 
               try {
                 await page.render({
                   canvasContext: context,
-                  viewport: renderViewport,
+                  viewport,
                 }).promise;
 
                 fullPageText = await recognizeFullPage(worker, canvas);
@@ -421,8 +490,8 @@ export default function QuestionImport() {
           if (completeText.length > maximum) {
             throw new Error(
               isBookMode
-                ? "Book text exceeds 600,000 characters. Process the PDF in smaller page ranges."
-                : "Extracted GK text exceeds 120,000 characters. Please split the PDF."
+                ? "Book text exceeds 600,000 characters."
+                : "Extracted GK text exceeds 120,000 characters."
             );
           }
 
@@ -432,7 +501,6 @@ export default function QuestionImport() {
             Math.round((pageNumber / pdfDocument.numPages) * 100)
           );
 
-          // Save progress after every page.
           const { error: saveError } = await supabase
             .from("question_import_batches")
             .update({
@@ -447,7 +515,6 @@ export default function QuestionImport() {
         }
       }
 
-      // 6. Stop OCR worker.
       if (worker) {
         await worker.terminate();
         worker = null;
@@ -457,11 +524,10 @@ export default function QuestionImport() {
         throw new Error("Very little text was extracted from the PDF.");
       }
 
-      // 7. Save completed source text.
       setStage("Saving extracted source");
 
       const completedNotes = isBookMode
-        ? `${importTag}; OCR completed. Original topic-wise Sawal/Jawab extraction is the next step. General Knowledge AI generation skipped.`
+        ? `${importTag}; OCR completed. Original Sawal/Jawab extraction pending.`
         : `${importTag}; OCR completed. Ready for General Knowledge AI draft generation.`;
 
       const { error: finishError } = await supabase
@@ -478,35 +544,26 @@ export default function QuestionImport() {
 
       ocrCompleted = true;
 
-      // 8. Islamic Book: save the source only.
-      // No AI-generated religious questions or answers are created.
       if (isBookMode) {
+        setSavedBatchId(batchId);
         setProgress(100);
         setStage("Book source saved");
-
         setMessage(
-          `Original book source saved successfully. ${pdfDocument.numPages} PDF pages were extracted. No AI-generated questions were created. The original Sawal/Jawab extraction step is still pending. Batch ID: ${batchId}`
+          `Original book saved successfully. Batch ID: ${batchId}. Now use the Extract Original Sawal/Jawab button below.`
         );
-
         return;
       }
 
-      // 9. Existing General Knowledge Gemini generation.
+      // Existing General Knowledge generator remains unchanged.
       setStage("Generating GK question drafts");
-
       setMessage(
         "OCR completed. Gemini is preparing General Knowledge drafts."
       );
 
-      const {
-        data: aiData,
-        error: aiError,
-      } = await supabase.functions.invoke(
-        "generate-quiz-drafts",
-        {
+      const { data: aiData, error: aiError } =
+        await supabase.functions.invoke("generate-quiz-drafts", {
           body: { batch_id: batchId },
-        }
-      );
+        });
 
       if (aiError) {
         throw new Error(await getAIErrorMessage(aiError));
@@ -515,16 +572,15 @@ export default function QuestionImport() {
       if (!aiData || aiData.error || aiData.success === false) {
         throw new Error(
           aiData?.error ||
-            aiData?.message ||
-            "AI question generation was unsuccessful."
+          aiData?.message ||
+          "AI question generation was unsuccessful."
         );
       }
 
       setProgress(100);
       setStage("Completed");
-
       setMessage(
-        `AI generation completed successfully! ${aiData.total} drafts prepared: ${aiData.true_false_count} True/False and ${aiData.mcq_count} MCQs. All drafts are pending Admin review.`
+        `AI generation completed successfully! ${aiData.total} drafts prepared: ${aiData.true_false_count} True/False and ${aiData.mcq_count} MCQs.`
       );
     } catch (error) {
       console.error("PDF import error:", error);
@@ -533,7 +589,7 @@ export default function QuestionImport() {
         try {
           await worker.terminate();
         } catch (workerError) {
-          console.error("OCR worker cleanup error:", workerError);
+          console.error(workerError);
         }
       }
 
@@ -543,34 +599,20 @@ export default function QuestionImport() {
           error?.message || "Unknown import error."
         ).slice(0, 350);
 
-        const errorNotes = ocrCompleted
-          ? `${importTag}; OCR completed, but the next processing step failed: ${detail}`
-          : `${importTag}; Import failed: ${detail}`;
-
-        const { error: updateError } = await supabase
+        await supabase
           .from("question_import_batches")
           .update({
             status: batchStatus,
-            notes: errorNotes,
+            notes: `${importTag}; Import failed: ${detail}`,
           })
           .eq("id", batchId);
-
-        if (updateError) {
-          console.error("Unable to update failed import batch:", updateError);
-        }
       } else if (uploadedFilePath) {
-        // Remove an orphan PDF if batch creation itself failed.
-        const { error: removeError } = await supabase.storage
+        await supabase.storage
           .from("question-bank-pdfs")
           .remove([uploadedFilePath]);
-
-        if (removeError) {
-          console.error("Unable to remove orphaned PDF:", removeError);
-        }
       }
 
       setStage("Needs attention");
-
       setMessage(
         `Import error: ${error?.message || "Something went wrong."}`
       );
@@ -578,16 +620,16 @@ export default function QuestionImport() {
       if (worker) {
         try {
           await worker.terminate();
-        } catch (workerError) {
-          console.error("OCR worker cleanup error:", workerError);
+        } catch (error) {
+          console.error(error);
         }
       }
 
       if (pdfDocument) {
         try {
           await pdfDocument.destroy();
-        } catch (pdfError) {
-          console.error("PDF cleanup error:", pdfError);
+        } catch (error) {
+          console.error(error);
         }
       }
 
@@ -616,12 +658,11 @@ export default function QuestionImport() {
             setImportType(event.target.value);
             resetOutput();
           }}
-          disabled={processing}
+          disabled={processing || extracting}
         >
           <option value="gk">
             General Knowledge — AI Draft Generation
           </option>
-
           <option value="islamic_book">
             Islamic Book — Original Sawal & Jawab
           </option>
@@ -635,7 +676,7 @@ export default function QuestionImport() {
           id="ocr-language"
           value={language}
           onChange={(event) => setLanguage(event.target.value)}
-          disabled={processing}
+          disabled={processing || extracting}
         >
           <option value="eng">English</option>
           <option value="urd">Urdu</option>
@@ -654,7 +695,7 @@ export default function QuestionImport() {
             setFile(event.target.files?.[0] || null);
             resetOutput();
           }}
-          disabled={processing}
+          disabled={processing || extracting}
         />
 
         {file && (
@@ -664,23 +705,51 @@ export default function QuestionImport() {
         )}
 
         {isBookMode && (
-          <p className="ocr-message">
-            Islamic Book mode saves the original source text and skips the
-            General Knowledge Gemini generator. It does not yet convert the
-            Sawal/Jawab into exam questions.
-          </p>
+          <>
+            <p className="ocr-message">
+              Original book mode extracts the existing Sawal/Jawab.
+              It does not create AI-written religious questions or MCQ options.
+            </p>
+
+            <label className="import-label" htmlFor="saved-batch-id">
+              EXISTING ISLAMIC BOOK BATCH ID
+            </label>
+
+            <input
+              id="saved-batch-id"
+              type="text"
+              value={savedBatchId}
+              onChange={(event) => setSavedBatchId(event.target.value)}
+              disabled={processing || extracting}
+            />
+
+            <button
+              type="button"
+              className="ocr-button"
+              onClick={extractOriginalQA}
+              disabled={processing || extracting || !savedBatchId.trim()}
+            >
+              {extracting
+                ? "EXTRACTING ORIGINAL SAWAL/JAWAB..."
+                : "EXTRACT / RESUME ORIGINAL SAWAL-JAWAB"}
+            </button>
+
+            {extractionProgress && (
+              <p className="ocr-stage">{extractionProgress}</p>
+            )}
+          </>
         )}
 
         <button
           type="button"
           className="ocr-button"
           onClick={startImport}
-          disabled={processing || !file}
+          disabled={processing || extracting || !file}
         >
           {processing
             ? "PROCESSING..."
             : isBookMode
-              ? "UPLOAD ISLAMIC BOOK & EXTRACT SOURCE"
+              ? "UPLOAD NEW ISLAMIC BOOK & SAVE SOURCE"
               : "UPLOAD PDF & GENERATE GK DRAFTS"}
         </button>
 
@@ -692,7 +761,7 @@ export default function QuestionImport() {
 
         {pageInfo && <p>{pageInfo}</p>}
 
-        {(processing || progress > 0) && (
+        {(processing || extracting || progress > 0) && (
           <div className="ocr-progress">
             <div className="progress-track">
               <div
@@ -700,7 +769,6 @@ export default function QuestionImport() {
                 style={{ width: `${progress}%` }}
               />
             </div>
-
             <strong>{progress}%</strong>
           </div>
         )}
@@ -715,12 +783,7 @@ export default function QuestionImport() {
       {preview && (
         <section className="ocr-preview">
           <h2>EXTRACTED SOURCE TEXT</h2>
-
-          <textarea
-            value={preview}
-            readOnly
-            rows={18}
-          />
+          <textarea value={preview} readOnly rows={18} />
         </section>
       )}
     </main>
