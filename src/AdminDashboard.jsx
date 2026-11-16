@@ -1,10 +1,10 @@
 
-import React, { useCallback, useEffect, useState } from "react";
+import { useCallback, useEffect, useState } from "react";
 import { useNavigate } from "react-router-dom";
 import {
-  Users, BookOpen, ClipboardList, Trophy, Settings,
+  Users, BookOpen, ClipboardList, Trophy,
   ShieldCheck, LogOut, LayoutDashboard, RefreshCw,
-  UserCheck, CalendarDays, TrendingUp, AlertTriangle
+  UserCheck, CalendarDays, AlertTriangle
 } from "lucide-react";
 import { supabase } from "./supabase";
 import "./AdminDashboard.css";
@@ -102,6 +102,8 @@ function AdminDashboard() {
   }, [navigate]);
 
   useEffect(() => {
+    // The loader performs async Supabase work and sets loading/data state.
+    // eslint-disable-next-line react-hooks/set-state-in-effect
     loadAdmin();
   }, [loadAdmin]);
 
@@ -197,6 +199,16 @@ function AdminDashboard() {
           </div>
 
           <div style={{ display: "flex", gap: 9, flexWrap: "wrap" }}>
+            {isSuperAdmin && (
+              <button
+                className="admin-logout"
+                onClick={() => navigate("/admin/management")}
+                type="button"
+                title="Promote registered candidates to administrator"
+              >
+                <ShieldCheck size={17} /> Manage Admins
+              </button>
+            )}
             <button
               className="admin-logout"
               onClick={loadAdmin}

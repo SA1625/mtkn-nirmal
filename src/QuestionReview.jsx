@@ -1,4 +1,4 @@
-import React, { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import { useNavigate } from "react-router-dom";
 import {
   ArrowLeft,
@@ -10,6 +10,7 @@ import {
   ChevronRight,
   BookOpen,
   Filter,
+  CheckSquare,
 } from "lucide-react";
 import { supabase } from "./supabase";
 
@@ -48,6 +49,9 @@ export default function QuestionReview() {
   const [search, setSearch] = useState("");
 
   const [selectedDraft, setSelectedDraft] = useState(null);
+  const [selectedDraftIds, setSelectedDraftIds] = useState([]);
+  const [bulkProcessing, setBulkProcessing] = useState(false);
+  const [bulkProgress, setBulkProgress] = useState("");
   const [edit, setEdit] = useState(EMPTY_EDIT);
 
   const [message, setMessage] = useState("");
@@ -132,6 +136,113 @@ export default function QuestionReview() {
       return matchesStatus && matchesBatch && matchesSearch;
     });
   }, [drafts, statusFilter, selectedBatch, search]);
+
+  const pendingFilteredDrafts = useMemo(
+    () => filteredDrafts.filter((draft) => draft.review_status === "pending"),
+    [filteredDrafts]
+  );
+
+  const selectedPendingIds = useMemo(
+    () => selectedDraftIds.filter((id) => drafts.some((draft) => draft.id === id && draft.review_status === "pending")),
+    [selectedDraftIds, drafts]
+  );
+
+  const allVisiblePendingSelected =
+    pendingFilteredDrafts.length > 0 &&
+    pendingFilteredDrafts.every((draft) => selectedDraftIds.includes(draft.id));
+
+  const toggleDraftSelection = (id) => {
+    setSelectedDraftIds((previous) =>
+      previous.includes(id)
+        ? previous.filter((item) => item !== id)
+        : [...previous, id]
+    );
+  };
+
+  const toggleSelectAllPending = () => {
+    const visibleIds = pendingFilteredDrafts.map((draft) => draft.id);
+    if (allVisiblePendingSelected) {
+      setSelectedDraftIds((previous) => previous.filter((id) => !visibleIds.includes(id)));
+    } else {
+      setSelectedDraftIds((previous) => [...new Set([...previous, ...visibleIds])]);
+    }
+  };
+
+  const bulkApproveSelected = async () => {
+    const ids = selectedPendingIds;
+    if (!ids.length) {
+      setError("Select at least one pending question first.");
+      return;
+    }
+    if (!window.confirm(`Approve ${ids.length} selected question(s) and add them to the approved question bank? Review the content before confirming.`)) return;
+
+    setBulkProcessing(true);
+    setBulkProgress(`Approving 0 of ${ids.length}...`);
+    setError("");
+    setMessage("");
+    let approved = 0;
+    const failures = [];
+
+    try {
+      // Small concurrent groups keep the bulk action responsive without flooding Supabase.
+      for (let start = 0; start < ids.length; start += 5) {
+        const group = ids.slice(start, start + 5);
+        const results = await Promise.all(group.map(async (id) => {
+          const { error: rpcError } = await supabase.rpc("approve_question_draft", {
+            p_draft_id: id,
+          });
+          return { id, error: rpcError };
+        }));
+
+        for (const result of results) {
+          if (result.error) failures.push({ id: result.id, message: result.error.message });
+          else approved += 1;
+        }
+        setBulkProgress(`Processed ${Math.min(start + group.length, ids.length)} of ${ids.length}...`);
+      }
+
+      setSelectedDraftIds([]);
+      setMessage(`${approved} question(s) approved.${failures.length ? ` ${failures.length} failed; refresh and review those drafts again.` : ""}`);
+      if (failures.length) {
+        setError(failures.slice(0, 3).map((item) => item.message).join(" · "));
+      }
+      await loadData();
+    } catch (err) {
+      setError(err.message || "Bulk approval failed.");
+    } finally {
+      setBulkProcessing(false);
+      setBulkProgress("");
+    }
+  };
+
+  const bulkRejectSelected = async () => {
+    const ids = selectedPendingIds;
+    if (!ids.length) {
+      setError("Select at least one pending question first.");
+      return;
+    }
+    if (!window.confirm(`Reject ${ids.length} selected pending question(s)? This will not delete them.`)) return;
+
+    setBulkProcessing(true);
+    setError("");
+    setMessage("");
+    try {
+      const { error: rejectError } = await supabase
+        .from("question_import_drafts")
+        .update({ review_status: "rejected", reviewed_at: new Date().toISOString() })
+        .in("id", ids)
+        .eq("review_status", "pending");
+      if (rejectError) throw rejectError;
+
+      setSelectedDraftIds([]);
+      setMessage(`${ids.length} question(s) rejected. They remain in the review history.`);
+      await loadData();
+    } catch (err) {
+      setError(err.message || "Bulk rejection failed.");
+    } finally {
+      setBulkProcessing(false);
+    }
+  };
 
   const counts = useMemo(
     () => ({
@@ -658,6 +769,32 @@ export default function QuestionReview() {
               <BookOpen size={20} /> QUESTION DRAFTS
             </h2>
 
+            {statusFilter !== "approved" && statusFilter !== "rejected" && (
+              <div style={styles.bulkToolbar}>
+                <label style={styles.selectAllLabel}>
+                  <input
+                    type="checkbox"
+                    checked={allVisiblePendingSelected}
+                    onChange={toggleSelectAllPending}
+                    disabled={bulkProcessing || pendingFilteredDrafts.length === 0}
+                  />
+                  <CheckSquare size={17} /> Select All Pending ({pendingFilteredDrafts.length} visible)
+                </label>
+                <span style={styles.selectedCount}>{selectedPendingIds.length} selected</span>
+                <div style={styles.bulkActions}>
+                  <button style={styles.approveButton} onClick={bulkApproveSelected} disabled={bulkProcessing || selectedPendingIds.length === 0}>
+                    <CheckCircle size={16} /> {bulkProcessing ? (bulkProgress || "Processing...") : "Approve Selected"}
+                  </button>
+                  <button style={styles.rejectButton} onClick={bulkRejectSelected} disabled={bulkProcessing || selectedPendingIds.length === 0}>
+                    <XCircle size={16} /> Reject Selected
+                  </button>
+                  <button style={styles.secondaryButton} onClick={() => setSelectedDraftIds([])} disabled={bulkProcessing || selectedDraftIds.length === 0}>
+                    Clear Selection
+                  </button>
+                </div>
+              </div>
+            )}
+
             {loading ? (
               <p>Loading question drafts...</p>
             ) : filteredDrafts.length === 0 ? (
@@ -669,9 +806,20 @@ export default function QuestionReview() {
                 {filteredDrafts.map((draft, index) => (
                   <article key={draft.id} style={styles.questionCard}>
                     <div style={styles.cardTop}>
-                      <span style={styles.number}>
-                        QUESTION {index + 1}
-                      </span>
+                      <div style={styles.cardTopLeft}>
+                        {draft.review_status === "pending" && (
+                          <input
+                            type="checkbox"
+                            aria-label={`Select question ${index + 1}`}
+                            checked={selectedDraftIds.includes(draft.id)}
+                            onChange={() => toggleDraftSelection(draft.id)}
+                            disabled={bulkProcessing}
+                          />
+                        )}
+                        <span style={styles.number}>
+                          QUESTION {index + 1}
+                        </span>
+                      </div>
                       <span
                         style={{
                           ...styles.status,
@@ -878,6 +1026,29 @@ const styles = {
     borderRadius: "10px",
     padding: "16px",
   },
+  bulkToolbar: {
+    display: "flex",
+    alignItems: "center",
+    justifyContent: "space-between",
+    gap: "12px",
+    flexWrap: "wrap",
+    padding: "14px",
+    margin: "14px 0 18px",
+    background: "#f6faf6",
+    border: "1px solid #dfe9df",
+    borderRadius: "10px",
+  },
+  selectAllLabel: {
+    display: "inline-flex",
+    alignItems: "center",
+    gap: "8px",
+    fontWeight: 700,
+    color: "#315b43",
+    cursor: "pointer",
+  },
+  selectedCount: { color: "#69766d", fontSize: "13px", fontWeight: 700 },
+  bulkActions: { display: "flex", gap: "8px", flexWrap: "wrap" },
+  cardTopLeft: { display: "flex", alignItems: "center", gap: "10px" },
   cardTop: {
     display: "flex",
     justifyContent: "space-between",

@@ -1,31 +1,39 @@
-
-import React, { useEffect, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import { useNavigate } from "react-router-dom";
-import { ArrowLeft, ShieldCheck, RefreshCw, UserCog } from "lucide-react";
+import {
+  ArrowLeft,
+  ShieldCheck,
+  RefreshCw,
+  UserCog,
+  Users,
+  Search,
+  UserPlus,
+  UserMinus,
+  Crown,
+} from "lucide-react";
 import { supabase } from "./supabase";
+import "./AdminManagement.css";
 
-function AdminManagement() {
+export default function AdminManagement() {
   const navigate = useNavigate();
-
-  const [admins, setAdmins] = useState([]);
   const [myRole, setMyRole] = useState("");
+  const [profiles, setProfiles] = useState([]);
+  const [activeTab, setActiveTab] = useState("candidates");
+  const [search, setSearch] = useState("");
   const [loading, setLoading] = useState(true);
-  const [savingId, setSavingId] = useState(null);
+  const [savingId, setSavingId] = useState("");
   const [error, setError] = useState("");
   const [message, setMessage] = useState("");
 
-  const loadAdmins = async () => {
+  const loadProfiles = async () => {
     setLoading(true);
     setError("");
-    setMessage("");
 
     try {
-      const { data: { user }, error: authError } =
-        await supabase.auth.getUser();
-
+      const { data: { user }, error: authError } = await supabase.auth.getUser();
       if (authError) throw authError;
       if (!user) {
-        navigate("/admin-login");
+        navigate("/admin-login", { replace: true });
         return;
       }
 
@@ -36,148 +44,201 @@ function AdminManagement() {
         .single();
 
       if (currentError) throw currentError;
-
-      if (!["admin", "super_admin"].includes(current.role)) {
-        navigate("/admin-login");
+      if (current?.role !== "super_admin") {
+        setMyRole(current?.role || "");
+        setError("Only the Super Admin can access Admin Management.");
         return;
       }
 
       setMyRole(current.role);
 
-      const { data, error } = await supabase
+      // These profile fields are already used by Candidate Management.
+      const { data, error: profilesError } = await supabase
         .from("profiles")
         .select("id, full_name, email, mobile_number, role, created_at")
-        .in("role", ["admin", "super_admin"])
-        .order("created_at", { ascending: true });
+        .order("created_at", { ascending: false });
 
-      if (error) throw error;
-      setAdmins(data || []);
+      if (profilesError) throw profilesError;
+      setProfiles(data || []);
     } catch (err) {
-      setError(err.message || "Unable to load administrators.");
+      setError(err.message || "Unable to load users.");
     } finally {
       setLoading(false);
     }
   };
 
   useEffect(() => {
-    loadAdmins();
+    // The loader performs async Supabase work and sets loading/data state.
+    // eslint-disable-next-line react-hooks/set-state-in-effect
+    loadProfiles();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
-  const changeRole = async (admin, newRole) => {
+  const candidates = useMemo(
+    () => profiles.filter((item) => item.role === "candidate"),
+    [profiles]
+  );
+
+  const admins = useMemo(
+    () => profiles.filter((item) => ["admin", "super_admin"].includes(item.role)),
+    [profiles]
+  );
+
+  const currentRows = activeTab === "candidates" ? candidates : admins;
+  const filteredRows = useMemo(() => {
+    const term = search.trim().toLowerCase();
+    if (!term) return currentRows;
+    return currentRows.filter((item) =>
+      [item.full_name, item.email, item.mobile_number, item.id]
+        .some((value) => String(value || "").toLowerCase().includes(term))
+    );
+  }, [currentRows, search]);
+
+  const updateRole = async (person, nextRole) => {
     if (myRole !== "super_admin") {
-      setError("Only the Super Admin can change administrator roles.");
+      setError("Only the Super Admin can change roles.");
+      return;
+    }
+    if (person.role === "super_admin") {
+      setError("The Super Admin account is protected.");
+      return;
+    }
+    if (!["admin", "candidate"].includes(nextRole)) {
+      setError("Invalid role selected.");
       return;
     }
 
-    if (admin.role === "super_admin") {
-      setError("Super Admin role cannot be changed from this screen.");
+    const action = nextRole === "admin" ? "promote to Admin" : "demote to Candidate";
+    if (!window.confirm(`Are you sure you want to ${action}: ${person.full_name || person.email || person.id}?`)) {
       return;
     }
 
-    if (!window.confirm(`Change ${admin.full_name}'s role to ${newRole}?`)) {
-      return;
-    }
-
-    setSavingId(admin.id);
+    setSavingId(person.id);
     setError("");
     setMessage("");
 
     try {
-      const { error } = await supabase.rpc("change_user_role", {
-        p_user_id: admin.id,
-        p_new_role: newRole
+      const { error: rpcError } = await supabase.rpc("change_user_role", {
+        p_user_id: person.id,
+        p_new_role: nextRole,
       });
+      if (rpcError) throw rpcError;
 
-      if (error) throw error;
-
-      setMessage("Administrator role updated successfully.");
-      await loadAdmins();
+      setMessage(`${person.full_name || "User"} is now ${nextRole === "admin" ? "an Admin" : "a Candidate"}.`);
+      await loadProfiles();
+      setActiveTab(nextRole === "admin" ? "admins" : "candidates");
     } catch (err) {
-      setError(err.message || "Unable to change administrator role.");
+      setError(err.message || "Unable to update user role.");
     } finally {
-      setSavingId(null);
+      setSavingId("");
     }
   };
 
+  if (myRole && myRole !== "super_admin") {
+    return (
+      <main className="am-page">
+        <div className="am-container">
+          <button className="am-back" onClick={() => navigate("/admin")}>
+            <ArrowLeft size={18} /> Admin Dashboard
+          </button>
+          <section className="am-notice am-error">
+            <ShieldCheck size={24} /> Only the Super Admin can manage administrator accounts.
+          </section>
+        </div>
+      </main>
+    );
+  }
+
   return (
-    <main style={s.page}>
-      <div style={s.container}>
-        <button style={s.back} onClick={() => navigate("/admin")}>
+    <main className="am-page">
+      <div className="am-container">
+        <button className="am-back" onClick={() => navigate("/admin")}>
           <ArrowLeft size={18} /> Admin Dashboard
         </button>
 
-        <header style={s.header}>
-          <ShieldCheck size={36} color="#176b50" />
+        <header className="am-header">
+          <div className="am-heading-icon"><ShieldCheck size={30} /></div>
           <div>
             <h1>ADMIN MANAGEMENT</h1>
-            <p style={s.muted}>Manage administrator accounts and access roles.</p>
+            <p>Promote registered candidates to Admin and manage existing administrator access.</p>
           </div>
         </header>
 
-        <section style={s.notice}>
-          <strong>Your role: {myRole || "Checking..."}</strong>
-          <p>
-            Super Admin has authority to manage administrator roles.
-            Regular Admin accounts cannot promote or demote other administrators.
-          </p>
+        <section className="am-stats">
+          <div><Users size={20} /><span>Registered Candidates</span><strong>{candidates.length}</strong></div>
+          <div><UserCog size={20} /><span>Administrators</span><strong>{admins.filter((x) => x.role === "admin").length}</strong></div>
+          <div><Crown size={20} /><span>Super Admin</span><strong>{admins.filter((x) => x.role === "super_admin").length}</strong></div>
         </section>
 
-        {error && <p style={s.error}>{error}</p>}
-        {message && <p style={s.success}>{message}</p>}
+        <section className="am-notice">
+          <strong>Your role: SUPER ADMIN</strong>
+          <p>To add a new Admin, the person must first register through the normal Candidate Registration page. Their account will then appear in Registered Candidates below.</p>
+        </section>
 
-        <button style={s.refresh} onClick={loadAdmins}>
-          <RefreshCw size={16} /> Refresh Administrators
-        </button>
+        {error && <div className="am-alert am-error">{error}</div>}
+        {message && <div className="am-alert am-success">{message}</div>}
 
-        {loading ? <p>Loading administrators...</p> : (
-          <div style={s.list}>
-            {admins.map(admin => (
-              <article key={admin.id} style={s.card}>
-                <div style={s.avatar}><UserCog size={22} /></div>
+        <div className="am-toolbar">
+          <div className="am-tabs">
+            <button className={activeTab === "candidates" ? "active" : ""} onClick={() => { setActiveTab("candidates"); setSearch(""); }}>
+              <Users size={16} /> Registered Candidates ({candidates.length})
+            </button>
+            <button className={activeTab === "admins" ? "active" : ""} onClick={() => { setActiveTab("admins"); setSearch(""); }}>
+              <ShieldCheck size={16} /> Administrators ({admins.length})
+            </button>
+          </div>
+          <button className="am-refresh" onClick={loadProfiles} disabled={loading || !!savingId}>
+            <RefreshCw size={16} /> Refresh
+          </button>
+        </div>
 
-                <div style={{ flex: 1 }}>
-                  <strong>{admin.full_name || "Administrator"}</strong>
-                  <p style={s.muted}>{admin.email}</p>
-                  <small style={s.muted}>{admin.mobile_number || ""}</small>
-                  <div style={s.role}>{admin.role.replace("_", " ").toUpperCase()}</div>
-                </div>
+        <label className="am-search">
+          <Search size={17} />
+          <input value={search} onChange={(event) => setSearch(event.target.value)} placeholder="Search name, email, mobile or user ID..." />
+        </label>
 
-                {myRole === "super_admin" && admin.role !== "super_admin" && (
-                  <select
-                    style={s.select}
-                    value={admin.role}
-                    disabled={savingId === admin.id}
-                    onChange={e => changeRole(admin, e.target.value)}
-                  >
-                    <option value="admin">Admin</option>
-                    <option value="candidate">Candidate</option>
-                  </select>
-                )}
-              </article>
-            ))}
-            {!admins.length && <p>No administrator accounts found.</p>}
+        {loading ? (
+          <div className="am-empty">Loading user accounts...</div>
+        ) : filteredRows.length === 0 ? (
+          <div className="am-empty">{activeTab === "candidates" ? "No registered candidates found." : "No administrator accounts found."}</div>
+        ) : (
+          <div className="am-table-wrap">
+            <table className="am-table">
+              <thead>
+                <tr><th>User</th><th>Contact</th><th>Role</th><th>Registered</th><th>Action</th></tr>
+              </thead>
+              <tbody>
+                {filteredRows.map((person) => (
+                  <tr key={person.id}>
+                    <td>
+                      <strong>{person.full_name || "Unnamed user"}</strong>
+                      <small className="am-user-id">{person.id}</small>
+                    </td>
+                    <td>{person.email || "—"}<small>{person.mobile_number || "—"}</small></td>
+                    <td><span className={`am-role ${person.role}`}>{person.role.replace("_", " ").toUpperCase()}</span></td>
+                    <td>{person.created_at ? new Date(person.created_at).toLocaleDateString() : "—"}</td>
+                    <td>
+                      {person.role === "super_admin" ? (
+                        <span className="am-protected"><Crown size={14} /> Protected account</span>
+                      ) : person.role === "candidate" ? (
+                        <button className="am-promote" onClick={() => updateRole(person, "admin")} disabled={savingId === person.id}>
+                          <UserPlus size={16} /> {savingId === person.id ? "Updating..." : "Make Admin"}
+                        </button>
+                      ) : (
+                        <button className="am-demote" onClick={() => updateRole(person, "candidate")} disabled={savingId === person.id}>
+                          <UserMinus size={16} /> {savingId === person.id ? "Updating..." : "Remove Admin"}
+                        </button>
+                      )}
+                    </td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
           </div>
         )}
+
+        <p className="am-footer-note">Role changes take effect immediately. The Super Admin account cannot be changed from this screen.</p>
       </div>
     </main>
   );
 }
-
-const s = {
-  page: { minHeight: "75vh", padding: "30px 16px", background: "#f5f7f4", color: "#173d32" },
-  container: { maxWidth: 900, margin: "auto" },
-  back: { display: "flex", gap: 8, alignItems: "center", border: 0, background: "transparent", color: "#176b50", cursor: "pointer", marginBottom: 22 },
-  header: { display: "flex", alignItems: "center", gap: 14, marginBottom: 22 },
-  muted: { color: "#718078", margin: "5px 0" },
-  notice: { padding: 18, background: "#edf5ef", borderRadius: 10, marginBottom: 20 },
-  list: { display: "grid", gap: 12, marginTop: 18 },
-  card: { display: "flex", alignItems: "center", gap: 15, background: "white", padding: 18, borderRadius: 12, border: "1px solid #e5ebe6" },
-  avatar: { width: 44, height: 44, display: "grid", placeItems: "center", background: "#edf5ef", borderRadius: 10 },
-  role: { display: "inline-block", marginTop: 8, background: "#edf5ef", padding: "5px 9px", borderRadius: 20, fontSize: 11, fontWeight: 700 },
-  select: { padding: 9, border: "1px solid #d5e2da", borderRadius: 7 },
-  refresh: { display: "flex", gap: 8, alignItems: "center", padding: "10px 14px", border: "1px solid #176b50", color: "#176b50", background: "white", borderRadius: 7, cursor: "pointer" },
-  error: { color: "#b42318" },
-  success: { color: "#08734e" }
-};
-
-export default AdminManagement;

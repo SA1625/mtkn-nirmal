@@ -1,4 +1,4 @@
-import React, { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import { useNavigate } from "react-router-dom";
 import {
   ArrowLeft,
@@ -14,6 +14,8 @@ import {
   ListChecks,
   Send,
   Layers,
+  CheckSquare,
+  Square,
 } from "lucide-react";
 import { supabase } from "./supabase";
 import SixLevelPaperGenerator from "./SixLevelPaperGenerator";
@@ -69,6 +71,7 @@ function ExamManagement() {
   const [builderSearch, setBuilderSearch] = useState("");
   const [builderType, setBuilderType] = useState("all");
   const [builderDifficulty, setBuilderDifficulty] = useState("all");
+  const [builderNotice, setBuilderNotice] = useState("");
 
   const loadExams = async () => {
     setLoading(true);
@@ -265,6 +268,7 @@ function ExamManagement() {
     setBuilderSearch("");
     setBuilderType("all");
     setBuilderDifficulty("all");
+    setBuilderNotice("");
 
     try {
       const { data: questions, error: questionError } = await supabase
@@ -326,11 +330,51 @@ function ExamManagement() {
   ).length;
 
   const toggleQuestion = (id) => {
+    setBuilderNotice("");
     setSelectedIds((previous) =>
       previous.includes(id)
         ? previous.filter((item) => item !== id)
         : [...previous, id]
     );
+  };
+
+  const selectAllFilteredQuestions = () => {
+    const existing = new Set(selectedIds);
+    let tfSlots = Math.max(0, 40 - tfSelected);
+    let mcqSlots = Math.max(0, 60 - mcqSelected);
+    let added = 0;
+    let skipped = 0;
+    const next = [...selectedIds];
+
+    for (const question of filteredBank) {
+      if (existing.has(question.id)) continue;
+
+      if (question.question_type === "true_false" && tfSlots > 0 && next.length < 100) {
+        next.push(question.id);
+        existing.add(question.id);
+        tfSlots -= 1;
+        added += 1;
+      } else if (question.question_type === "mcq" && mcqSlots > 0 && next.length < 100) {
+        next.push(question.id);
+        existing.add(question.id);
+        mcqSlots -= 1;
+        added += 1;
+      } else {
+        skipped += 1;
+      }
+    }
+
+    setSelectedIds(next);
+    setBuilderNotice(
+      added
+        ? `Added ${added} question(s) from the current filtered list. Selection remains capped at 40 True/False + 60 MCQ. ${skipped ? `${skipped} visible question(s) were skipped because a section was full.` : ""}`
+        : "No more questions can be added from the current filtered list."
+    );
+  };
+
+  const clearManualSelection = () => {
+    setSelectedIds([]);
+    setBuilderNotice("Selection cleared.");
   };
 
   const saveManualPaper = async () => {
@@ -662,6 +706,21 @@ function ExamManagement() {
                 }}
               />
             </div>
+
+            <div className="exam-select-all-toolbar">
+              <button
+                type="button"
+                onClick={selectAllFilteredQuestions}
+                disabled={builderLoading || selectedIds.length >= 100 || filteredBank.length === 0}
+              >
+                <CheckSquare size={16} /> Select All Visible (fill available slots)
+              </button>
+              <button type="button" onClick={clearManualSelection} disabled={selectedIds.length === 0 || saving}>
+                <Square size={16} /> Clear Selection
+              </button>
+              <span>{filteredBank.length} question(s) match the current filters.</span>
+            </div>
+            {builderNotice && <p className="exam-message">{builderNotice}</p>}
 
             <div className="exam-builder-filters">
               <input
