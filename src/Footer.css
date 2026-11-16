@@ -5,6 +5,7 @@
   color: #ffffff;
   padding: 30px 5% 15px;
   margin-top: 40px;
+  box-sizing: border-box;
 }
 
 .footer-content {
@@ -24,14 +25,14 @@
   min-width: 250px;
 }
 
-.footer-item svg {
+.footer-item > svg {
   color: #f5d77a;
   flex-shrink: 0;
   margin-top: 3px;
 }
 
 .footer-item h3 {
-  margin: 0 0 8px;
+  margin: 0 0 12px;
   font-size: 16px;
   font-weight: 700;
 }
@@ -43,6 +44,112 @@
   color: #e8f5ed;
 }
 
+/* Address Card */
+
+.address-details {
+  width: 100%;
+  max-width: 390px;
+}
+
+.address-card {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 14px;
+  background: #ffffff;
+  color: #145c38;
+  border: 1px solid #f5d77a;
+  border-radius: 10px;
+  text-decoration: none;
+  font-size: 14px;
+  font-weight: 600;
+  line-height: 1.5;
+  box-shadow: 0 3px 8px rgba(0, 0, 0, 0.12);
+  transition: all 0.25s ease;
+}
+
+.address-card > svg {
+  color: #c69b27;
+  flex-shrink: 0;
+}
+
+.address-card:hover {
+  background: #fff8df;
+  transform: translateY(-5px) scale(1.02);
+  box-shadow: 0 9px 20px rgba(0, 0, 0, 0.22);
+}
+
+.map-label {
+  margin-left: auto;
+  color: #145c38;
+  font-size: 10px;
+  font-weight: 800;
+  white-space: nowrap;
+}
+
+/* Contact Cards */
+
+.contact-details {
+  width: 100%;
+  max-width: 340px;
+}
+
+.contact-cards {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+
+.contact-card {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  width: 100%;
+  padding: 13px 15px;
+  box-sizing: border-box;
+  background: #ffffff;
+  color: #145c38;
+  border: 1px solid rgba(245, 215, 122, 0.5);
+  border-radius: 10px;
+  text-decoration: none;
+  font-size: 18px;
+  font-weight: 800;
+  letter-spacing: 0.4px;
+  box-shadow: 0 3px 8px rgba(0, 0, 0, 0.12);
+  transition: all 0.25s ease;
+}
+
+.contact-card > svg {
+  color: #c69b27;
+  flex-shrink: 0;
+}
+
+.contact-card:hover {
+  background: #fff8df;
+  color: #0b4229;
+  transform: translateY(-5px) scale(1.02);
+  box-shadow: 0 9px 20px rgba(0, 0, 0, 0.22);
+}
+
+.contact-card:focus-visible,
+.address-card:focus-visible {
+  outline: 3px solid #f5d77a;
+  outline-offset: 4px;
+}
+
+.call-label {
+  margin-left: auto;
+  padding: 5px 9px;
+  border-radius: 20px;
+  background: #145c38;
+  color: #ffffff;
+  font-size: 10px;
+  letter-spacing: 1px;
+  font-weight: 700;
+}
+
+/* Footer Bottom */
+
 .footer-bottom {
   max-width: 1200px;
   margin: 25px auto 0;
@@ -53,6 +160,8 @@
   color: #e8f5ed;
 }
 
+/* Mobile Responsive */
+
 @media (max-width: 600px) {
   .footer-content {
     flex-direction: column;
@@ -61,5 +170,29 @@
 
   .footer-item {
     min-width: 100%;
+  }
+
+  .contact-details,
+  .address-details {
+    max-width: 100%;
+  }
+
+  .contact-card {
+    font-size: 17px;
+    padding: 13px;
+  }
+}
+
+/* Accessibility */
+
+@media (prefers-reduced-motion: reduce) {
+  .contact-card,
+  .address-card {
+    transition: none;
+  }
+
+  .contact-card:hover,
+  .address-card:hover {
+    transform: none;
   }
 }
