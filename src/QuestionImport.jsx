@@ -1,4 +1,3 @@
-
 import { useState } from "react";
 import { useNavigate } from "react-router-dom";
 import { supabase } from "./supabase";
@@ -24,27 +23,43 @@ function getSideText(items, side, pageWidth) {
   const middle = pageWidth / 2;
 
   const selected = items
-    .filter((item) => typeof item.str === "string" && item.str.trim())
+    .filter(
+      (item) =>
+        typeof item.str === "string" &&
+        item.str.trim()
+    )
     .map((item) => ({
       text: item.str.trim(),
       x: Number(item.transform?.[4] || 0),
       y: Number(item.transform?.[5] || 0),
     }))
     .filter((item) =>
-      side === "left" ? item.x < middle : item.x >= middle
+      side === "left"
+        ? item.x < middle
+        : item.x >= middle
     )
     .sort((a, b) => {
-      if (Math.abs(b.y - a.y) > 3) return b.y - a.y;
+      if (Math.abs(b.y - a.y) > 3) {
+        return b.y - a.y;
+      }
+
       return a.x - b.x;
     });
 
   const lines = [];
 
   for (const item of selected) {
-    let line = lines.find((entry) => Math.abs(entry.y - item.y) <= 3);
+    let line = lines.find(
+      (entry) =>
+        Math.abs(entry.y - item.y) <= 3
+    );
 
     if (!line) {
-      line = { y: item.y, items: [] };
+      line = {
+        y: item.y,
+        items: [],
+      };
+
       lines.push(line);
     }
 
@@ -66,8 +81,13 @@ function getSideText(items, side, pageWidth) {
 function getFullPageText(items) {
   return (items || [])
     .map((item) => {
-      const text = typeof item.str === "string" ? item.str : "";
+      const text =
+        typeof item.str === "string"
+          ? item.str
+          : "";
+
       if (!text.trim()) return "";
+
       return `${text}${item.hasEOL ? "\n" : " "}`;
     })
     .join("")
@@ -81,15 +101,27 @@ async function recognizeFullPage(worker, canvas) {
   return result?.data?.text || "";
 }
 
-async function recognizeHalf(worker, sourceCanvas, side) {
-  const halfWidth = Math.floor(sourceCanvas.width / 2);
+async function recognizeHalf(
+  worker,
+  sourceCanvas,
+  side
+) {
+  const halfWidth = Math.floor(
+    sourceCanvas.width / 2
+  );
+
   const canvas = document.createElement("canvas");
   const context = canvas.getContext("2d");
 
-  if (!context) throw new Error("Unable to create OCR canvas.");
+  if (!context) {
+    throw new Error("Unable to create OCR canvas.");
+  }
 
   canvas.width =
-    side === "left" ? halfWidth : sourceCanvas.width - halfWidth;
+    side === "left"
+      ? halfWidth
+      : sourceCanvas.width - halfWidth;
+
   canvas.height = sourceCanvas.height;
 
   context.drawImage(
@@ -115,10 +147,21 @@ async function recognizeHalf(worker, sourceCanvas, side) {
 
 async function getAIErrorMessage(error) {
   try {
-    if (error?.context && typeof error.context.json === "function") {
+    if (
+      error?.context &&
+      typeof error.context.json === "function"
+    ) {
       const data = await error.context.json();
-      if (data?.error) return data.error;
-      if (data?.message) return data.message;
+
+      if (data?.error) {
+        return typeof data.error === "string"
+          ? data.error
+          : data.error.message || JSON.stringify(data.error);
+      }
+
+      if (data?.message) {
+        return data.message;
+      }
     }
   } catch {
     // Use the normal error message.
@@ -127,16 +170,24 @@ async function getAIErrorMessage(error) {
   return error?.message || "AI generation request failed.";
 }
 
+function isGeminiQuotaError(message) {
+  return /429|RESOURCE_EXHAUSTED|quota|rate.?limit|GEMINI_RATE_LIMIT/i.test(
+    String(message || "")
+  );
+}
+
 export default function QuestionImport() {
   const navigate = useNavigate();
 
   const [file, setFile] = useState(null);
   const [importType, setImportType] = useState("gk");
   const [language, setLanguage] = useState("eng+urd");
+
   const [progress, setProgress] = useState(0);
   const [message, setMessage] = useState("");
   const [processing, setProcessing] = useState(false);
   const [extracting, setExtracting] = useState(false);
+
   const [preview, setPreview] = useState("");
   const [pageInfo, setPageInfo] = useState("");
   const [stage, setStage] = useState("");
@@ -145,13 +196,23 @@ export default function QuestionImport() {
     EXISTING_ISLAMIC_BATCH
   );
 
-  const [extractionProgress, setExtractionProgress] = useState("");
-  const [generatingBookDrafts, setGeneratingBookDrafts] = useState(false);
-  const [draftProgress, setDraftProgress] = useState("");
+  const [extractionProgress, setExtractionProgress] =
+    useState("");
 
-  const [classifyingBook, setClassifyingBook] = useState(false);
-  const [finalizingBook, setFinalizingBook] = useState(false);
-  const [classificationProgress, setClassificationProgress] = useState("");
+  const [generatingBookDrafts, setGeneratingBookDrafts] =
+    useState(false);
+
+  const [draftProgress, setDraftProgress] =
+    useState("");
+
+  const [classifyingBook, setClassifyingBook] =
+    useState(false);
+
+  const [finalizingBook, setFinalizingBook] =
+    useState(false);
+
+  const [classificationProgress, setClassificationProgress] =
+    useState("");
 
   const isBookMode = importType === "islamic_book";
 
@@ -172,13 +233,19 @@ export default function QuestionImport() {
 
   const extractOriginalQA = async () => {
     if (!savedBatchId.trim()) {
-      setMessage("Please enter the Islamic book batch ID.");
+      setMessage(
+        "Please enter the Islamic book batch ID."
+      );
       return;
     }
 
-    if (!window.confirm(
-      "Start or resume original Sawal/Jawab extraction from the saved Islamic book OCR?"
-    )) return;
+    if (
+      !window.confirm(
+        "Start or resume original Sawal/Jawab extraction from the saved Islamic book OCR?"
+      )
+    ) {
+      return;
+    }
 
     setExtracting(true);
     setMessage("");
@@ -192,52 +259,84 @@ export default function QuestionImport() {
       let totalChunks = 0;
 
       while (!finished) {
-        setStage(`Extracting original book section ${chunkIndex + 1}`);
-
-        const { data, error } = await supabase.functions.invoke(
-          "extract-islamic-book-qa",
-          {
-            body: {
-              batch_id: savedBatchId.trim(),
-              chunk_index: chunkIndex,
-            },
-          }
+        setStage(
+          `Extracting original book section ${chunkIndex + 1}`
         );
 
-        if (error) throw new Error(await getAIErrorMessage(error));
+        const { data, error } =
+          await supabase.functions.invoke(
+            "extract-islamic-book-qa",
+            {
+              body: {
+                batch_id: savedBatchId.trim(),
+                chunk_index: chunkIndex,
+              },
+            }
+          );
 
-        if (!data || data.success === false) {
-          throw new Error(data?.error || "Original book extraction failed.");
+        if (error) {
+          throw new Error(
+            await getAIErrorMessage(error)
+          );
         }
 
-        totalChunks = data.total_chunks || totalChunks;
-        totalExtracted = data.extracted_count ?? totalExtracted;
+        if (!data || data.success === false) {
+          throw new Error(
+            data?.error ||
+              "Original book extraction failed."
+          );
+        }
+
+        totalChunks =
+          data.total_chunks || totalChunks;
+
+        totalExtracted =
+          data.extracted_count ?? totalExtracted;
+
         finished = Boolean(data.complete);
 
         setExtractionProgress(
-          `Completed ${data.completed_chunks ?? chunkIndex + 1} of ${totalChunks} sections · ${totalExtracted} original Q&A pairs saved`
+          `Completed ${
+            data.completed_chunks ?? chunkIndex + 1
+          } of ${totalChunks} sections · ${totalExtracted} original Q&A pairs saved`
         );
 
         setProgress(
           totalChunks
             ? Math.round(
-                ((data.completed_chunks ?? chunkIndex + 1) / totalChunks) * 100
+                (
+                  (data.completed_chunks ??
+                    chunkIndex + 1) /
+                  totalChunks
+                ) * 100
               )
             : 0
         );
 
-        if (!finished) chunkIndex += 1;
+        if (!finished) {
+          chunkIndex += 1;
+        }
       }
 
       setStage("Original extraction completed");
+
       setMessage(
         `Success! ${totalExtracted} original Sawal/Jawab pairs have been saved for Admin review.`
       );
     } catch (error) {
-      console.error("Original Q&A extraction error:", error);
-      setStage("Extraction paused — safe to resume");
+      console.error(
+        "Original Q&A extraction error:",
+        error
+      );
+
+      setStage(
+        "Extraction paused — safe to resume"
+      );
+
       setMessage(
-        `Extraction paused: ${error?.message || "Unknown error"}. Press Resume Extraction to continue.`
+        `Extraction paused: ${
+          error?.message || "Unknown error"
+        }. Press Resume Extraction to continue.`
       );
     } finally {
       setExtracting(false);
@@ -250,17 +349,25 @@ export default function QuestionImport() {
 
   const generateBookDrafts = async () => {
     if (!savedBatchId.trim()) {
-      setMessage("Islamic book batch ID is missing.");
+      setMessage(
+        "Islamic book batch ID is missing."
+      );
       return;
     }
 
-    if (!window.confirm(
-      "Generate MCQ and True/False review drafts from the saved original 474 Q&A pairs? This will NOT publish questions to the quiz bank."
-    )) return;
+    if (
+      !window.confirm(
+        "Generate MCQ and True/False review drafts from the saved original 474 Q&A pairs? This will NOT publish questions to the quiz bank."
+      )
+    ) {
+      return;
+    }
 
     setGeneratingBookDrafts(true);
     setMessage("");
-    setDraftProgress("Preparing original book Q&A...");
+    setDraftProgress(
+      "Preparing original book Q&A..."
+    );
     setStage("Generating review drafts");
 
     try {
@@ -270,57 +377,100 @@ export default function QuestionImport() {
       let completed = false;
 
       while (!completed) {
-        const { data, error } = await supabase.functions.invoke(
-          "generate-islamic-book-drafts",
-          {
-            body: {
-              batch_id: savedBatchId.trim(),
-              start_index: startIndex,
-              limit: 5,
-            },
-          }
-        );
+        const { data, error } =
+          await supabase.functions.invoke(
+            "generate-islamic-book-drafts",
+            {
+              body: {
+                batch_id: savedBatchId.trim(),
+                start_index: startIndex,
+                limit: 5,
+              },
+            }
+          );
 
-        if (error) throw new Error(await getAIErrorMessage(error));
-
-        if (!data || data.success === false || data.error) {
+        if (error) {
           throw new Error(
-            data?.error || "Islamic book draft generation failed."
+            await getAIErrorMessage(error)
           );
         }
 
-        totalPairs = data.total_source_pairs ?? totalPairs;
-        totalInserted += Number(data.drafts_inserted || 0);
+        if (
+          !data ||
+          data.success === false ||
+          data.error
+        ) {
+          throw new Error(
+            data?.error ||
+              "Islamic book draft generation failed."
+          );
+        }
+
+        totalPairs =
+          data.total_source_pairs ?? totalPairs;
+
+        totalInserted += Number(
+          data.drafts_inserted || 0
+        );
+
         completed = Boolean(data.complete);
 
-        const nextIndex = Number(data.next_start_index);
+        const nextIndex = Number(
+          data.next_start_index
+        );
 
-        if (!Number.isFinite(nextIndex) || (nextIndex <= startIndex && !completed)) {
-          throw new Error("The server did not return a valid next batch position.");
+        if (
+          !Number.isFinite(nextIndex) ||
+          (nextIndex <= startIndex && !completed)
+        ) {
+          throw new Error(
+            "The server did not return a valid next batch position."
+          );
         }
 
         startIndex = nextIndex;
 
         const percent = totalPairs
-          ? Math.min(100, Math.round((startIndex / totalPairs) * 100))
-          : completed ? 100 : 0;
+          ? Math.min(
+              100,
+              Math.round(
+                (startIndex / totalPairs) * 100
+              )
+            )
+          : completed
+            ? 100
+            : 0;
 
         setProgress(percent);
+
         setDraftProgress(
-          `${Math.min(startIndex, totalPairs)} of ${totalPairs} original Q&A pairs processed · ${totalInserted} new drafts saved`
+          `${Math.min(
+            startIndex,
+            totalPairs
+          )} of ${totalPairs} original Q&A pairs processed · ${totalInserted} new drafts saved`
         );
       }
 
       setProgress(100);
       setStage("Draft generation completed");
+
       setMessage(
         `Success! Original Q&A processing completed. ${totalInserted} new MCQ/True-False drafts were saved for Admin review. No questions were published to the quiz bank.`
       );
     } catch (error) {
-      console.error("Islamic book draft generation error:", error);
-      setStage("Draft generation paused — safe to resume");
+      console.error(
+        "Islamic book draft generation error:",
+        error
+      );
+
+      setStage(
+        "Draft generation paused — safe to resume"
+      );
+
       setMessage(
-        `Draft generation paused: ${error?.message || "Unknown error"}. Press Generate Drafts again to resume.`
+        `Draft generation paused: ${
+          error?.message || "Unknown error"
+        }. Press Generate Drafts again to resume.`
       );
     } finally {
       setGeneratingBookDrafts(false);
@@ -333,70 +483,149 @@ export default function QuestionImport() {
 
   const classifyBookDrafts = async () => {
     if (!savedBatchId.trim()) {
-      setMessage("Islamic book batch ID is missing.");
+      setMessage(
+        "Islamic book batch ID is missing."
+      );
       return;
     }
 
-    if (!window.confirm(
-      "Classify all 474 original book pairs using AI? Existing drafts will NOT be edited, approved or deleted."
-    )) return;
+    if (
+      !window.confirm(
+        "Classify all 474 original book pairs using AI? Existing drafts will NOT be edited, approved or deleted."
+      )
+    ) {
+      return;
+    }
 
     setClassifyingBook(true);
     setMessage("");
     setProgress(0);
-    setClassificationProgress("Starting classification...");
+
+    setClassificationProgress(
+      "Starting classification..."
+    );
 
     try {
-      let startIndex = 0;
       let completed = false;
+      let total = 0;
+      let requestCount = 0;
+
+      // The server checks Supabase for completed rows.
+      // Therefore, resume does not depend on the browser
+      // remembering the previous start_index.
 
       while (!completed) {
-        const { data, error } = await supabase.functions.invoke(
-          "reclassify-islamic-book-drafts",
-          {
-            body: {
-              action: "classify",
-              batch_id: savedBatchId.trim(),
-              start_index: startIndex,
-              limit: 5,
-            },
-          }
+        requestCount += 1;
+
+        setStage(
+          `Classifying questions — batch ${requestCount}`
         );
 
-        if (error) throw new Error(await getAIErrorMessage(error));
+        const { data, error } =
+          await supabase.functions.invoke(
+            "reclassify-islamic-book-drafts",
+            {
+              body: {
+                action: "classify",
+                batch_id: savedBatchId.trim(),
+              },
+            }
+          );
 
-        if (!data || data.error || data.success === false) {
-          throw new Error(data?.error || "Classification failed.");
+        if (error) {
+          const detail =
+            await getAIErrorMessage(error);
+
+          if (isGeminiQuotaError(detail)) {
+            throw new Error(
+              `Gemini daily quota reached. Classification has been safely paused. Your completed batches are saved. ${detail}`
+            );
+          }
+
+          throw new Error(detail);
         }
 
-        startIndex = Number(data.next_start_index);
+        if (
+          !data ||
+          data.error ||
+          data.success === false
+        ) {
+          const detail =
+            data?.error ||
+            "Classification failed.";
+
+          if (
+            data?.rate_limited ||
+            isGeminiQuotaError(detail)
+          ) {
+            throw new Error(
+              `Gemini quota reached. Classification has been safely paused. Your completed batches are saved. ${detail}`
+            );
+          }
+
+          throw new Error(detail);
+        }
+
+        total = Number(
+          data.classified_total || 0
+        );
+
         completed = Boolean(data.complete);
 
-        if (!Number.isFinite(startIndex)) {
-          throw new Error("Invalid classification progress received.");
-        }
-
-        const total = Number(data.classified_total || 0);
-
-        setProgress(Math.min(100, Math.round((total / 474) * 100)));
-        setClassificationProgress(
-          `${total} of 474 original pairs classified`
+        setProgress(
+          Math.min(
+            100,
+            Math.round((total / 474) * 100)
+          )
         );
+
+        setClassificationProgress(
+          `${total} of 474 original pairs classified · ${data.pairs_per_request || 20} pairs per Gemini request`
+        );
+
+        if (!completed && !data.newly_classified && !data.skipped) {
+          throw new Error(
+            "No classification progress was made. Please check the saved drafts and try again."
+          );
+        }
       }
 
       setProgress(100);
+
       setClassificationProgress(
         "All 474 original pairs classified successfully."
       );
+
+      setStage("Classification completed");
+
       setMessage(
         "Classification completed. Now click FINALIZE SIX-LEVEL SELECTION."
       );
     } catch (error) {
-      console.error("Islamic book classification:", error);
-      setMessage(
-        `Classification paused: ${error?.message || "Unknown error"}. Click CLASSIFY / RESUME again to continue.`
+      console.error(
+        "Islamic book classification:",
+        error
       );
-      setClassificationProgress("Classification paused — safe to resume.");
+
+      const detail =
+        error?.message || "Unknown error";
+
+      const quotaPaused =
+        isGeminiQuotaError(detail);
+
+      setMessage(
+        quotaPaused
+          ? `${detail} Wait for the Gemini quota reset, then click CLASSIFY / RESUME.`
+          : `Classification paused: ${detail}. Click CLASSIFY / RESUME to continue.`
+      );
+
+      setClassificationProgress(
+        "Classification paused — saved progress is safe to resume."
+      );
+
+      setStage(
+        "Classification paused — safe to resume"
+      );
     } finally {
       setClassifyingBook(false);
     }
@@ -408,49 +637,87 @@ export default function QuestionImport() {
 
   const finalizeBookClassification = async () => {
     if (!savedBatchId.trim()) {
-      setMessage("Islamic book batch ID is missing.");
+      setMessage(
+        "Islamic book batch ID is missing."
+      );
       return;
     }
 
-    if (!window.confirm(
-      "Finalize the selection: 49 MCQ + 29 True/False per level? This changes only the classification table, not the question drafts."
-    )) return;
+    if (
+      !window.confirm(
+        "Finalize the selection: 49 MCQ + 29 True/False per level? This changes only the classification table, not the question drafts."
+      )
+    ) {
+      return;
+    }
 
     setFinalizingBook(true);
     setMessage("");
 
     try {
-      const { data, error } = await supabase.functions.invoke(
-        "reclassify-islamic-book-drafts",
-        {
-          body: {
-            action: "finalize",
-            batch_id: savedBatchId.trim(),
-          },
-        }
-      );
+      const { data, error } =
+        await supabase.functions.invoke(
+          "reclassify-islamic-book-drafts",
+          {
+            body: {
+              action: "finalize",
+              batch_id: savedBatchId.trim(),
+            },
+          }
+        );
 
-      if (error) throw new Error(await getAIErrorMessage(error));
-
-      if (!data || data.error || data.success === false) {
-        throw new Error(data?.error || "Final selection failed.");
+      if (error) {
+        throw new Error(
+          await getAIErrorMessage(error)
+        );
       }
 
-      const summary = Object.entries(data.levels || {})
+      if (
+        !data ||
+        data.error ||
+        data.success === false
+      ) {
+        throw new Error(
+          data?.error ||
+            "Final selection failed."
+        );
+      }
+
+      const summary = Object.entries(
+        data.levels || {}
+      )
         .map(([level, counts]) =>
           `${level}: ${counts.mcq} MCQ + ${counts.true_false} True/False`
         )
         .join("\n");
 
       setProgress(100);
-      setClassificationProgress("Six-level selection completed.");
+
+      setClassificationProgress(
+        "Six-level selection completed."
+      );
+
+      setStage("Final selection completed");
+
       setMessage(
-        `SUCCESS! Selected ${data.selected_mcq || data.selected_total_mcq} MCQs and ${data.selected_true_false || data.selected_total_true_false} True/False drafts.\n\n${summary}\n\nExtra drafts remain unselected and pending.`
+        `SUCCESS! Selected ${
+          data.selected_mcq ||
+          data.selected_total_mcq
+        } MCQs and ${
+          data.selected_true_false ||
+          data.selected_total_true_false
+        } True/False drafts.\n\n${summary}\n\nExtra drafts remain unselected and pending.`
       );
     } catch (error) {
-      console.error("Book finalization error:", error);
+      console.error(
+        "Book finalization error:",
+        error
+      );
+
       setMessage(
-        `Finalization failed: ${error?.message || "Unknown error"}`
+        `Finalization failed: ${
+          error?.message || "Unknown error"
+        }`
       );
     } finally {
       setFinalizingBook(false);
@@ -463,7 +730,9 @@ export default function QuestionImport() {
 
   const startImport = async () => {
     if (!file) {
-      setMessage("Please select a PDF file first.");
+      setMessage(
+        "Please select a PDF file first."
+      );
       return;
     }
 
@@ -471,12 +740,16 @@ export default function QuestionImport() {
       file.type !== "application/pdf" &&
       !file.name.toLowerCase().endsWith(".pdf")
     ) {
-      setMessage("Only PDF files are allowed.");
+      setMessage(
+        "Only PDF files are allowed."
+      );
       return;
     }
 
     if (file.size > MAX_PDF_SIZE) {
-      setMessage("PDF is too large. Maximum allowed size is 25 MB.");
+      setMessage(
+        "PDF is too large. Maximum allowed size is 25 MB."
+      );
       return;
     }
 
@@ -498,23 +771,42 @@ export default function QuestionImport() {
       : "IMPORT_TYPE=GENERAL_KNOWLEDGE";
 
     try {
-      const { data: userData, error: userError } = await supabase.auth.getUser();
+      const {
+        data: userData,
+        error: userError,
+      } = await supabase.auth.getUser();
 
-      if (userError) throw userError;
+      if (userError) {
+        throw userError;
+      }
 
       const user = userData?.user;
-      if (!user) throw new Error("Please login again.");
 
-      const { data: profile, error: profileError } = await supabase
+      if (!user) {
+        throw new Error("Please login again.");
+      }
+
+      const {
+        data: profile,
+        error: profileError,
+      } = await supabase
         .from("profiles")
         .select("role")
         .eq("id", user.id)
         .single();
 
-      if (profileError) throw profileError;
+      if (profileError) {
+        throw profileError;
+      }
 
-      if (!["admin", "super_admin"].includes(profile?.role)) {
-        throw new Error("Only an Admin or Super Admin can import PDFs.");
+      if (
+        !["admin", "super_admin"].includes(
+          profile?.role
+        )
+      ) {
+        throw new Error(
+          "Only an Admin or Super Admin can import PDFs."
+        );
       }
 
       setStage("Uploading original PDF");
@@ -522,14 +814,18 @@ export default function QuestionImport() {
       uploadedFilePath =
         `${user.id}/${Date.now()}-${getSafeFileName(file.name)}`;
 
-      const { error: uploadError } = await supabase.storage
+      const {
+        error: uploadError,
+      } = await supabase.storage
         .from("question-bank-pdfs")
         .upload(uploadedFilePath, file, {
           contentType: "application/pdf",
           upsert: false,
         });
 
-      if (uploadError) throw uploadError;
+      if (uploadError) {
+        throw uploadError;
+      }
 
       setStage("Creating import batch");
 
@@ -537,7 +833,10 @@ export default function QuestionImport() {
         ? `${importTag}; Original Sawal/Jawab extraction pending.`
         : `${importTag}; General Knowledge AI draft generation.`;
 
-      const { data: batch, error: batchError } = await supabase
+      const {
+        data: batch,
+        error: batchError,
+      } = await supabase
         .from("question_import_batches")
         .insert({
           file_name: file.name,
@@ -550,32 +849,48 @@ export default function QuestionImport() {
         .select("id")
         .single();
 
-      if (batchError) throw batchError;
+      if (batchError) {
+        throw batchError;
+      }
 
       batchId = batch.id;
 
-      if (isBookMode) setSavedBatchId(batch.id);
+      if (isBookMode) {
+        setSavedBatchId(batch.id);
+      }
 
       setStage("Reading PDF");
 
-      const pdfData = new Uint8Array(await file.arrayBuffer());
+      const pdfData = new Uint8Array(
+        await file.arrayBuffer()
+      );
 
       pdfDocument = await pdfjsLib.getDocument({
         data: pdfData,
       }).promise;
 
       if (!pdfDocument.numPages) {
-        throw new Error("The selected PDF does not contain any pages.");
+        throw new Error(
+          "The selected PDF does not contain any pages."
+        );
       }
 
-      setPageInfo(`Total PDF pages: ${pdfDocument.numPages}`);
+      setPageInfo(
+        `Total PDF pages: ${pdfDocument.numPages}`
+      );
 
-      const { error: pageCountError } = await supabase
+      const {
+        error: pageCountError,
+      } = await supabase
         .from("question_import_batches")
-        .update({ total_pages: pdfDocument.numPages })
+        .update({
+          total_pages: pdfDocument.numPages,
+        })
         .eq("id", batchId);
 
-      if (pageCountError) throw pageCountError;
+      if (pageCountError) {
+        throw pageCountError;
+      }
 
       let completeText = "";
 
@@ -584,45 +899,76 @@ export default function QuestionImport() {
         pageNumber <= pdfDocument.numPages;
         pageNumber += 1
       ) {
-        const page = await pdfDocument.getPage(pageNumber);
+        const page =
+          await pdfDocument.getPage(pageNumber);
 
         try {
           setMessage(
             `Extracting PDF page ${pageNumber} of ${pdfDocument.numPages}`
           );
 
-          const textContent = await page.getTextContent();
+          const textContent =
+            await page.getTextContent();
+
           const items = textContent.items || [];
 
           let pageText = "";
 
           if (isBookMode) {
-            const textViewport = page.getViewport({ scale: 1 });
+            const textViewport =
+              page.getViewport({ scale: 1 });
 
-            let leftText = getSideText(items, "left", textViewport.width);
-            let rightText = getSideText(items, "right", textViewport.width);
+            let leftText = getSideText(
+              items,
+              "left",
+              textViewport.width
+            );
 
-            const needsLeftOCR = leftText.length < 40;
-            const needsRightOCR = rightText.length < 40;
+            let rightText = getSideText(
+              items,
+              "right",
+              textViewport.width
+            );
+
+            const needsLeftOCR =
+              leftText.length < 40;
+
+            const needsRightOCR =
+              rightText.length < 40;
 
             if (needsLeftOCR || needsRightOCR) {
               setStage("Running OCR on book pages");
 
               if (!worker) {
-                setMessage("Loading OCR language data...");
+                setMessage(
+                  "Loading OCR language data..."
+                );
+
                 worker = await createWorker(language);
               }
 
-              const viewport = page.getViewport({ scale: 2 });
-              const canvas = document.createElement("canvas");
-              const context = canvas.getContext("2d");
+              const viewport =
+                page.getViewport({ scale: 2 });
+
+              const canvas =
+                document.createElement("canvas");
+
+              const context =
+                canvas.getContext("2d");
 
               if (!context) {
-                throw new Error("Unable to create PDF rendering canvas.");
+                throw new Error(
+                  "Unable to create PDF rendering canvas."
+                );
               }
 
-              canvas.width = Math.ceil(viewport.width);
-              canvas.height = Math.ceil(viewport.height);
+              canvas.width = Math.ceil(
+                viewport.width
+              );
+
+              canvas.height = Math.ceil(
+                viewport.height
+              );
 
               try {
                 await page.render({
@@ -631,11 +977,19 @@ export default function QuestionImport() {
                 }).promise;
 
                 if (needsLeftOCR) {
-                  leftText = await recognizeHalf(worker, canvas, "left");
+                  leftText = await recognizeHalf(
+                    worker,
+                    canvas,
+                    "left"
+                  );
                 }
 
                 if (needsRightOCR) {
-                  rightText = await recognizeHalf(worker, canvas, "right");
+                  rightText = await recognizeHalf(
+                    worker,
+                    canvas,
+                    "right"
+                  );
                 }
               } finally {
                 canvas.width = 0;
@@ -649,26 +1003,42 @@ export default function QuestionImport() {
               `\n--- PDF PAGE ${pageNumber} RIGHT BOOK PAGE ---\n` +
               `${rightText}`;
           } else {
-            let fullPageText = getFullPageText(items);
+            let fullPageText =
+              getFullPageText(items);
 
             if (fullPageText.length < 40) {
               setStage("Running OCR on full GK page");
 
               if (!worker) {
-                setMessage("Loading OCR language data...");
+                setMessage(
+                  "Loading OCR language data..."
+                );
+
                 worker = await createWorker(language);
               }
 
-              const viewport = page.getViewport({ scale: 2 });
-              const canvas = document.createElement("canvas");
-              const context = canvas.getContext("2d");
+              const viewport =
+                page.getViewport({ scale: 2 });
+
+              const canvas =
+                document.createElement("canvas");
+
+              const context =
+                canvas.getContext("2d");
 
               if (!context) {
-                throw new Error("Unable to create PDF rendering canvas.");
+                throw new Error(
+                  "Unable to create PDF rendering canvas."
+                );
               }
 
-              canvas.width = Math.ceil(viewport.width);
-              canvas.height = Math.ceil(viewport.height);
+              canvas.width = Math.ceil(
+                viewport.width
+              );
+
+              canvas.height = Math.ceil(
+                viewport.height
+              );
 
               try {
                 await page.render({
@@ -676,14 +1046,19 @@ export default function QuestionImport() {
                   viewport,
                 }).promise;
 
-                fullPageText = await recognizeFullPage(worker, canvas);
+                fullPageText =
+                  await recognizeFullPage(
+                    worker,
+                    canvas
+                  );
               } finally {
                 canvas.width = 0;
                 canvas.height = 0;
               }
             }
 
-            pageText = `\n\n--- PDF PAGE ${pageNumber} ---\n${fullPageText}`;
+            pageText =
+              `\n\n--- PDF PAGE ${pageNumber} ---\n${fullPageText}`;
           }
 
           completeText += pageText;
@@ -703,10 +1078,15 @@ export default function QuestionImport() {
           setPreview(completeText);
 
           setProgress(
-            Math.round((pageNumber / pdfDocument.numPages) * 100)
+            Math.round(
+              (pageNumber / pdfDocument.numPages) *
+                100
+            )
           );
 
-          const { error: saveError } = await supabase
+          const {
+            error: saveError,
+          } = await supabase
             .from("question_import_batches")
             .update({
               processed_pages: pageNumber,
@@ -714,7 +1094,9 @@ export default function QuestionImport() {
             })
             .eq("id", batchId);
 
-          if (saveError) throw saveError;
+          if (saveError) {
+            throw saveError;
+          }
         } finally {
           page.cleanup();
         }
@@ -726,7 +1108,9 @@ export default function QuestionImport() {
       }
 
       if (completeText.trim().length < 100) {
-        throw new Error("Very little text was extracted from the PDF.");
+        throw new Error(
+          "Very little text was extracted from the PDF."
+        );
       }
 
       setStage("Saving extracted source");
@@ -735,7 +1119,9 @@ export default function QuestionImport() {
         ? `${importTag}; OCR completed. Original Sawal/Jawab extraction pending.`
         : `${importTag}; OCR completed. Ready for General Knowledge AI draft generation.`;
 
-      const { error: finishError } = await supabase
+      const {
+        error: finishError,
+      } = await supabase
         .from("question_import_batches")
         .update({
           status: "needs_review",
@@ -745,7 +1131,9 @@ export default function QuestionImport() {
         })
         .eq("id", batchId);
 
-      if (finishError) throw finishError;
+      if (finishError) {
+        throw finishError;
+      }
 
       ocrCompleted = true;
 
@@ -753,39 +1141,61 @@ export default function QuestionImport() {
         setSavedBatchId(batchId);
         setProgress(100);
         setStage("Book source saved");
+
         setMessage(
           `Original book saved successfully. Batch ID: ${batchId}. Now use the Extract Original Sawal/Jawab button below.`
         );
+
         return;
       }
 
       setStage("Generating GK question drafts");
+
       setMessage(
         "OCR completed. Gemini is preparing General Knowledge drafts."
       );
 
-      const { data: aiData, error: aiError } =
-        await supabase.functions.invoke("generate-quiz-drafts", {
-          body: { batch_id: batchId },
-        });
+      const {
+        data: aiData,
+        error: aiError,
+      } = await supabase.functions.invoke(
+        "generate-quiz-drafts",
+        {
+          body: {
+            batch_id: batchId,
+          },
+        }
+      );
 
-      if (aiError) throw new Error(await getAIErrorMessage(aiError));
+      if (aiError) {
+        throw new Error(
+          await getAIErrorMessage(aiError)
+        );
+      }
 
-      if (!aiData || aiData.error || aiData.success === false) {
+      if (
+        !aiData ||
+        aiData.error ||
+        aiData.success === false
+      ) {
         throw new Error(
           aiData?.error ||
-          aiData?.message ||
-          "AI question generation was unsuccessful."
+            aiData?.message ||
+            "AI question generation was unsuccessful."
         );
       }
 
       setProgress(100);
       setStage("Completed");
+
       setMessage(
         `AI generation completed successfully! ${aiData.total} drafts prepared: ${aiData.true_false_count} True/False and ${aiData.mcq_count} MCQs.`
       );
     } catch (error) {
-      console.error("PDF import error:", error);
+      console.error(
+        "PDF import error:",
+        error
+      );
 
       if (worker) {
         try {
@@ -796,7 +1206,10 @@ export default function QuestionImport() {
       }
 
       if (batchId) {
-        const batchStatus = ocrCompleted ? "needs_review" : "failed";
+        const batchStatus = ocrCompleted
+          ? "needs_review"
+          : "failed";
+
         const detail = (
           error?.message || "Unknown import error."
         ).slice(0, 350);
@@ -805,7 +1218,8 @@ export default function QuestionImport() {
           .from("question_import_batches")
           .update({
             status: batchStatus,
-            notes: `${importTag}; Import failed: ${detail}`,
+            notes:
+              `${importTag}; Import failed: ${detail}`,
           })
           .eq("id", batchId);
       } else if (uploadedFilePath) {
@@ -815,8 +1229,11 @@ export default function QuestionImport() {
       }
 
       setStage("Needs attention");
+
       setMessage(
-        `Import error: ${error?.message || "Something went wrong."}`
+        `Import error: ${
+          error?.message || "Something went wrong."
+        }`
       );
     } finally {
       if (worker) {
@@ -839,25 +1256,36 @@ export default function QuestionImport() {
     }
   };
 
+  // -------------------------------------------------------
+  // PAGE UI
+  // -------------------------------------------------------
+
   return (
     <main className="import-page">
       <header className="import-heading">
         <button
           type="button"
           className="back-to-question-bank"
-          onClick={() => navigate("/admin/questions")}
+          onClick={() =>
+            navigate("/admin/questions")
+          }
         >
           ← Back to Question Bank
         </button>
 
         <h1>QUESTION BANK IMPORT</h1>
+
         <p>
-          Import General Knowledge papers or original Islamic book questions.
+          Import General Knowledge papers or
+          original Islamic book questions.
         </p>
       </header>
 
       <section className="import-card">
-        <label className="import-label" htmlFor="import-type">
+        <label
+          className="import-label"
+          htmlFor="import-type"
+        >
           SELECT IMPORT TYPE
         </label>
 
@@ -868,32 +1296,55 @@ export default function QuestionImport() {
             setImportType(event.target.value);
             resetOutput();
           }}
-          disabled={processing || extracting || generatingBookDrafts}
+          disabled={
+            processing ||
+            extracting ||
+            generatingBookDrafts ||
+            classifyingBook ||
+            finalizingBook
+          }
         >
           <option value="gk">
             General Knowledge — AI Draft Generation
           </option>
+
           <option value="islamic_book">
             Islamic Book — Original Sawal & Jawab
           </option>
         </select>
 
-        <label className="import-label" htmlFor="ocr-language">
+        <label
+          className="import-label"
+          htmlFor="ocr-language"
+        >
           OCR LANGUAGE
         </label>
 
         <select
           id="ocr-language"
           value={language}
-          onChange={(event) => setLanguage(event.target.value)}
-          disabled={processing || extracting || generatingBookDrafts}
+          onChange={(event) =>
+            setLanguage(event.target.value)
+          }
+          disabled={
+            processing ||
+            extracting ||
+            generatingBookDrafts ||
+            classifyingBook ||
+            finalizingBook
+          }
         >
           <option value="eng">English</option>
           <option value="urd">Urdu</option>
-          <option value="eng+urd">English + Urdu</option>
+          <option value="eng+urd">
+            English + Urdu
+          </option>
         </select>
 
-        <label className="import-label" htmlFor="source-pdf">
+        <label
+          className="import-label"
+          htmlFor="source-pdf"
+        >
           SELECT SOURCE PDF
         </label>
 
@@ -902,10 +1353,19 @@ export default function QuestionImport() {
           type="file"
           accept=".pdf,application/pdf"
           onChange={(event) => {
-            setFile(event.target.files?.[0] || null);
+            setFile(
+              event.target.files?.[0] || null
+            );
+
             resetOutput();
           }}
-          disabled={processing || extracting || generatingBookDrafts}
+          disabled={
+            processing ||
+            extracting ||
+            generatingBookDrafts ||
+            classifyingBook ||
+            finalizingBook
+          }
         />
 
         {file && (
@@ -917,11 +1377,15 @@ export default function QuestionImport() {
         {isBookMode && (
           <>
             <p className="ocr-message">
-              Original book mode extracts the existing Sawal/Jawab.
-              It does not create AI-written religious questions or MCQ options.
+              Original book mode extracts the existing
+              Sawal/Jawab. It does not create AI-written
+              religious questions or MCQ options.
             </p>
 
-            <label className="import-label" htmlFor="saved-batch-id">
+            <label
+              className="import-label"
+              htmlFor="saved-batch-id"
+            >
               EXISTING ISLAMIC BOOK BATCH ID
             </label>
 
@@ -929,9 +1393,19 @@ export default function QuestionImport() {
               id="saved-batch-id"
               type="text"
               value={savedBatchId}
-              onChange={(event) => setSavedBatchId(event.target.value)}
-              disabled={processing || extracting || generatingBookDrafts || classifyingBook || finalizingBook}
+              onChange={(event) =>
+                setSavedBatchId(event.target.value)
+              }
+              disabled={
+                processing ||
+                extracting ||
+                generatingBookDrafts ||
+                classifyingBook ||
+                finalizingBook
+              }
             />
+
+            {/* ORIGINAL EXTRACTION */}
 
             <button
               type="button"
@@ -952,8 +1426,12 @@ export default function QuestionImport() {
             </button>
 
             {extractionProgress && (
-              <p className="ocr-stage">{extractionProgress}</p>
+              <p className="ocr-stage">
+                {extractionProgress}
+              </p>
             )}
+
+            {/* GENERATE REVIEW DRAFTS */}
 
             <button
               type="button"
@@ -974,22 +1452,32 @@ export default function QuestionImport() {
             </button>
 
             {draftProgress && (
-              <p className="ocr-stage" role="status">
+              <p
+                className="ocr-stage"
+                role="status"
+              >
                 {draftProgress}
               </p>
             )}
 
             <p className="ocr-message">
-              This step converts the saved original Q&A into pending review drafts.
-              It does not approve or publish questions.
+              This step converts the saved original
+              Q&A into pending review drafts. It does
+              not approve or publish questions.
             </p>
 
+            {/* SIX-LEVEL CLASSIFICATION */}
+
             <div className="book-classification-panel">
-              <h3>ORIGINAL BOOK — SIX LEVEL CLASSIFICATION</h3>
+              <h3>
+                ORIGINAL BOOK — SIX LEVEL CLASSIFICATION
+              </h3>
 
               <p className="ocr-message">
-                Classify the existing MCQ and True/False drafts independently.
-                Existing questions will not be edited, approved or deleted.
+                Classify the existing MCQ and
+                True/False drafts independently.
+                Existing questions will not be edited,
+                approved or deleted.
               </p>
 
               <button
@@ -1029,13 +1517,18 @@ export default function QuestionImport() {
               </button>
 
               {classificationProgress && (
-                <p className="ocr-stage" role="status">
+                <p
+                  className="ocr-stage"
+                  role="status"
+                >
                   {classificationProgress}
                 </p>
               )}
             </div>
           </>
         )}
+
+        {/* PDF UPLOAD */}
 
         <button
           type="button"
@@ -1065,20 +1558,30 @@ export default function QuestionImport() {
 
         {pageInfo && <p>{pageInfo}</p>}
 
-        {(processing || extracting || generatingBookDrafts || classifyingBook || progress > 0) && (
+        {(processing ||
+          extracting ||
+          generatingBookDrafts ||
+          classifyingBook ||
+          progress > 0) && (
           <div className="ocr-progress">
             <div className="progress-track">
               <div
                 className="progress-fill"
-                style={{ width: `${progress}%` }}
+                style={{
+                  width: `${progress}%`,
+                }}
               />
             </div>
+
             <strong>{progress}%</strong>
           </div>
         )}
 
         {message && (
-          <p className="ocr-message" role="status">
+          <p
+            className="ocr-message"
+            role="status"
+          >
             {message}
           </p>
         )}
@@ -1087,7 +1590,12 @@ export default function QuestionImport() {
       {preview && (
         <section className="ocr-preview">
           <h2>EXTRACTED SOURCE TEXT</h2>
-          <textarea value={preview} readOnly rows={18} />
+
+          <textarea
+            value={preview}
+            readOnly
+            rows={18}
+          />
         </section>
       )}
     </main>

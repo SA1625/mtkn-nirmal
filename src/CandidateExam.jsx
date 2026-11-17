@@ -190,6 +190,19 @@ function CandidateExam() {
   const warningIntervalRef = useRef(null);
   const warningDismissRef = useRef(null);
 
+  const isSixLevelIslamicQuiz = Boolean(
+    exam &&
+    [
+      "Foundation",
+      "Beginner",
+      "Intermediate",
+      "Moderate",
+      "Advanced",
+      "Expert"
+    ].includes(exam.level_name) &&
+    exam.exam_name === `Islamic Quiz 2026 - ${exam.level_name}`
+  );
+
   const currentQuestion = questions[currentIndex];
   const answeredCount = Object.keys(answers).length;
   const unansweredCount = Math.max(0, questions.length - answeredCount);
@@ -459,7 +472,7 @@ function CandidateExam() {
 
   // Tab-switching and exam-window discipline
   useEffect(() => {
-    if (stage !== "exam" || !attemptId) return;
+    if (stage !== "exam" || !attemptId || isSixLevelIslamicQuiz) return;
 
     const handleVisibility = () => {
       if (document.visibilityState === "hidden") {
@@ -553,7 +566,7 @@ function CandidateExam() {
       document.removeEventListener("visibilitychange", handleVisibility);
       clearViolationTimers();
     };
-  }, [stage, attemptId]);
+  }, [stage, attemptId, isSixLevelIslamicQuiz]);
 
   const confirmSubmit = async () => {
     if (answeredCount !== 100) {
@@ -911,12 +924,22 @@ function CandidateExam() {
               <p>You may revisit and change answers.</p>
             </article>
 
-            <article className="instruction-red">
-              <strong>EXAMINATION DISCIPLINE</strong>
-              <p>First tab switch: 30-second warning.</p>
-              <p>Second tab switch: 10-second warning.</p>
-              <p>Third tab switch: immediate termination.</p>
-            </article>
+            {!isSixLevelIslamicQuiz && (
+              <article className="instruction-red">
+                <strong>EXAMINATION DISCIPLINE</strong>
+                <p>First tab switch: 30-second warning.</p>
+                <p>Second tab switch: 10-second warning.</p>
+                <p>Third tab switch: immediate termination.</p>
+              </article>
+            )}
+
+            {isSixLevelIslamicQuiz && (
+              <article className="instruction-teal">
+                <strong>TAB SWITCHING</strong>
+                <p>Tab switching will not terminate this Islamic Quiz examination.</p>
+                <p>Your answers continue to be saved securely.</p>
+              </article>
+            )}
 
             <article className="instruction-teal">
               <strong>FINAL SUBMISSION</strong>
@@ -934,8 +957,10 @@ function CandidateExam() {
 
             <span>
               I have read and understood all instructions.
-              I agree to follow the examination rules and understand
-              the tab-switching discipline.
+              I agree to follow the examination rules.
+              {isSixLevelIslamicQuiz
+                ? " Tab switching will not terminate this examination."
+                : " I understand the tab-switching discipline."}
             </span>
           </label>
 
@@ -1390,11 +1415,13 @@ function CandidateExam() {
 
         <span>
           <LogOut size={16} />
-          Do not leave this examination window.
+          {isSixLevelIslamicQuiz
+            ? "You may switch tabs; this exam will not terminate for tab switching."
+            : "Do not leave this examination window."}
         </span>
       </div>
 
-      {showViolationWarning && (
+      {!isSixLevelIslamicQuiz && showViolationWarning && (
         <div
           style={{
             position: "fixed",

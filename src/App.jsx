@@ -1,9 +1,11 @@
+
 import React from "react";
 import {
   Routes,
   Route,
   Navigate,
   useLocation,
+  useNavigationType,
 } from "react-router-dom";
 
 import Header from "./Header";
@@ -38,9 +40,18 @@ import AdminManagement from "./AdminManagement";
 
 function AppLayout() {
   const location = useLocation();
+  const navigationType = useNavigationType();
 
-  // Hide Header and Footer only on the candidate exam page.
+  // Hide header and footer only on the actual examination screen.
   const isExamPage = /^\/exam\/[^/]+$/.test(location.pathname);
+
+  React.useEffect(() => {
+    window.scrollTo({
+      top: 0,
+      left: 0,
+      behavior: "instant",
+    });
+  }, [location.pathname, location.search, navigationType]);
 
   return (
     <>
@@ -192,7 +203,7 @@ function AppLayout() {
           }
         />
 
-        {/* INVALID URL */}
+        {/* UNKNOWN URL */}
         <Route path="*" element={<Navigate to="/" replace />} />
       </Routes>
 
@@ -201,8 +212,6 @@ function AppLayout() {
   );
 }
 
-function App() {
+export default function App() {
   return <AppLayout />;
 }
-
-export default App;
