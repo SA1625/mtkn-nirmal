@@ -2,7 +2,6 @@
 import React, { useEffect, useState } from "react";
 import { useNavigate } from "react-router-dom";
 import { supabase } from "./supabase";
-import "./Dashboard.css";
 
 function AuthCallback() {
   const navigate = useNavigate();

@@ -1,4 +1,3 @@
-
 import { useState } from "react";
 import { supabase } from "./supabase";
 import { createWorker } from "tesseract.js";
@@ -53,7 +52,8 @@ function getSideText(items, side, pageWidth) {
   return lines
     .sort((a, b) => b.y - a.y)
     .map((line) =>
-      line.items.sort((a, b) => a.x - b.x)
+      line.items
+        .sort((a, b) => a.x - b.x)
         .map((item) => item.text)
         .join(" ")
     )
@@ -140,6 +140,8 @@ export default function QuestionImport() {
     EXISTING_ISLAMIC_BATCH
   );
   const [extractionProgress, setExtractionProgress] = useState("");
+  const [generatingBookDrafts, setGeneratingBookDrafts] = useState(false);
+  const [draftProgress, setDraftProgress] = useState("");
 
   const isBookMode = importType === "islamic_book";
 
@@ -150,6 +152,7 @@ export default function QuestionImport() {
     setPageInfo("");
     setStage("");
     setExtractionProgress("");
+    setDraftProgress("");
   };
 
   // -------------------------------------------------------
@@ -236,6 +239,100 @@ export default function QuestionImport() {
       );
     } finally {
       setExtracting(false);
+    }
+  };
+
+  // -------------------------------------------------------
+  // CONVERT SAVED ORIGINAL BOOK Q&A INTO REVIEW DRAFTS
+  // -------------------------------------------------------
+
+  const generateBookDrafts = async () => {
+    if (!savedBatchId.trim()) {
+      setMessage("Islamic book batch ID is missing.");
+      return;
+    }
+
+    if (!window.confirm(
+      "Generate MCQ and True/False review drafts from the saved original 474 Q&A pairs? This will NOT publish questions to the quiz bank."
+    )) {
+      return;
+    }
+
+    setGeneratingBookDrafts(true);
+    setMessage("");
+    setDraftProgress("Preparing original book Q&A...");
+    setStage("Generating review drafts");
+
+    try {
+      let startIndex = 0;
+      let totalPairs = 0;
+      let totalInserted = 0;
+      let completed = false;
+
+      while (!completed) {
+        const { data, error } = await supabase.functions.invoke(
+          "generate-islamic-book-drafts",
+          {
+            body: {
+              batch_id: savedBatchId.trim(),
+              start_index: startIndex,
+              limit: 5,
+            },
+          }
+        );
+
+        if (error) {
+          throw new Error(await getAIErrorMessage(error));
+        }
+
+        if (!data || data.success === false || data.error) {
+          throw new Error(
+            data?.error || "Islamic book draft generation failed."
+          );
+        }
+
+        totalPairs = data.total_source_pairs ?? totalPairs;
+        totalInserted += Number(data.drafts_inserted || 0);
+        completed = Boolean(data.complete);
+
+        const nextIndex = Number(data.next_start_index);
+
+        if (
+          !Number.isFinite(nextIndex) ||
+          (nextIndex <= startIndex && !completed)
+        ) {
+          throw new Error(
+            "The server did not return a valid next batch position."
+          );
+        }
+
+        startIndex = nextIndex;
+
+        const percent = totalPairs
+          ? Math.min(100, Math.round((startIndex / totalPairs) * 100))
+          : completed
+            ? 100
+            : 0;
+
+        setProgress(percent);
+        setDraftProgress(
+          `${Math.min(startIndex, totalPairs)} of ${totalPairs} original Q&A pairs processed · ${totalInserted} new drafts saved`
+        );
+      }
+
+      setProgress(100);
+      setStage("Draft generation completed");
+      setMessage(
+        `Success! Original Q&A processing completed. ${totalInserted} new MCQ/True-False drafts were saved for Admin review. No questions were published to the quiz bank.`
+      );
+    } catch (error) {
+      console.error("Islamic book draft generation error:", error);
+      setStage("Draft generation paused — safe to resume");
+      setMessage(
+        `Draft generation paused: ${error?.message || "Unknown error"}. Press Generate Drafts again to resume; previously saved drafts will be skipped.`
+      );
+    } finally {
+      setGeneratingBookDrafts(false);
     }
   };
 
@@ -658,7 +755,7 @@ export default function QuestionImport() {
             setImportType(event.target.value);
             resetOutput();
           }}
-          disabled={processing || extracting}
+          disabled={processing || extracting || generatingBookDrafts}
         >
           <option value="gk">
             General Knowledge — AI Draft Generation
@@ -676,7 +773,7 @@ export default function QuestionImport() {
           id="ocr-language"
           value={language}
           onChange={(event) => setLanguage(event.target.value)}
-          disabled={processing || extracting}
+          disabled={processing || extracting || generatingBookDrafts}
         >
           <option value="eng">English</option>
           <option value="urd">Urdu</option>
@@ -695,7 +792,7 @@ export default function QuestionImport() {
             setFile(event.target.files?.[0] || null);
             resetOutput();
           }}
-          disabled={processing || extracting}
+          disabled={processing || extracting || generatingBookDrafts}
         />
 
         {file && (
@@ -720,14 +817,19 @@ export default function QuestionImport() {
               type="text"
               value={savedBatchId}
               onChange={(event) => setSavedBatchId(event.target.value)}
-              disabled={processing || extracting}
+              disabled={processing || extracting || generatingBookDrafts}
             />
 
             <button
               type="button"
               className="ocr-button"
               onClick={extractOriginalQA}
-              disabled={processing || extracting || !savedBatchId.trim()}
+              disabled={
+                processing ||
+                extracting ||
+                generatingBookDrafts ||
+                !savedBatchId.trim()
+              }
             >
               {extracting
                 ? "EXTRACTING ORIGINAL SAWAL/JAWAB..."
@@ -737,6 +839,33 @@ export default function QuestionImport() {
             {extractionProgress && (
               <p className="ocr-stage">{extractionProgress}</p>
             )}
+
+            <button
+              type="button"
+              className="ocr-button"
+              onClick={generateBookDrafts}
+              disabled={
+                processing ||
+                extracting ||
+                generatingBookDrafts ||
+                !savedBatchId.trim()
+              }
+            >
+              {generatingBookDrafts
+                ? "GENERATING REVIEW DRAFTS..."
+                : "GENERATE MCQ + TRUE/FALSE REVIEW DRAFTS"}
+            </button>
+
+            {draftProgress && (
+              <p className="ocr-stage" role="status">
+                {draftProgress}
+              </p>
+            )}
+
+            <p className="ocr-message">
+              This step converts the saved original Q&A into pending review drafts.
+              It does not approve or publish questions.
+            </p>
           </>
         )}
 
@@ -744,7 +873,7 @@ export default function QuestionImport() {
           type="button"
           className="ocr-button"
           onClick={startImport}
-          disabled={processing || extracting || !file}
+          disabled={processing || extracting || generatingBookDrafts || !file}
         >
           {processing
             ? "PROCESSING..."
@@ -761,7 +890,7 @@ export default function QuestionImport() {
 
         {pageInfo && <p>{pageInfo}</p>}
 
-        {(processing || extracting || progress > 0) && (
+        {(processing || extracting || generatingBookDrafts || progress > 0) && (
           <div className="ocr-progress">
             <div className="progress-track">
               <div
