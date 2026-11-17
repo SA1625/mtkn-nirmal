@@ -21,6 +21,10 @@ function normalizeLevel(v: unknown) {
   return LEVELS.find(x => x.toLowerCase() === clean(v).toLowerCase()) || "Intermediate";
 }
 
+
+const sleep = (ms: number) =>
+  new Promise((resolve) => setTimeout(resolve, ms));
+
 async function generatePair(apiKey: string, source: any) {
   const prompt = `You convert ONE supplied original Islamic-book Sawal/Jawab pair into TWO quiz drafts. Use only the supplied answer as factual evidence; do not add external religious claims. Preserve the source language/script (Urdu stays Urdu, Roman Urdu stays Roman Urdu). Create one MCQ with exactly four distinct options and one unambiguous correct option, and one True/False statement with answer exactly True or False. Both must test the supplied answer. Do not make disputed theological assertions. Difficulty must be exactly one of ${LEVELS.join(", ")}. Use the same difficulty for both. Return JSON only: {"difficulty":"Foundation|Beginner|Intermediate|Moderate|Advanced|Expert","mcq":{"question_text":"...","options":["...","...","...","..."],"correct_answer":"one exact option","explanation":"..."},"true_false":{"question_text":"...","correct_answer":"True or False","explanation":"..."}}\nOriginal question: ${clean(source.question_text)}\nOriginal answer: ${clean(source.answer_text)}\nTopic: ${clean(source.topic) || "Islamic Studies"}`;
   const res = await fetch(`${GEMINI_URL}?key=${encodeURIComponent(apiKey)}`, {
@@ -75,7 +79,8 @@ Deno.serve(async (req) => {
       if (!originalQuestion || !originalAnswer) { skipped++; continue; }
       const keyMCQ = `${originalQuestion}|||mcq`, keyTF = `${originalQuestion}|||true_false`;
       if (existingKeys.has(keyMCQ) && existingKeys.has(keyTF)) { skipped++; continue; }
-      const result = await generatePair(geminiKey, source);
+      await sleep(4500);
+const result = await generatePair(geminiKey, source);
       const page = Number(source.source_page) > 0 ? Number(source.source_page) : null;
       const common = { batch_id: batchId, topic: clean(source.topic) || "Islamic Studies", difficulty: result.level, source_level: result.level, eligible_levels: [result.level], source_page: page, source_question: originalQuestion, review_status: "pending" };
       if (!existingKeys.has(keyMCQ)) rows.push({ ...common, question_type: "mcq", section: "B", question_text: clean(result.mcq.question_text), options: result.mcq.options, correct_answer: clean(result.mcq.correct_answer), explanation: clean(result.mcq.explanation) || `Based on original book answer: ${originalAnswer}` });

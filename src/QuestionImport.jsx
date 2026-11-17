@@ -1,4 +1,5 @@
 import { useState } from "react";
+import { useNavigate } from "react-router-dom";
 import { supabase } from "./supabase";
 import { createWorker } from "tesseract.js";
 import * as pdfjsLib from "pdfjs-dist";
@@ -126,6 +127,7 @@ async function getAIErrorMessage(error) {
 }
 
 export default function QuestionImport() {
+  const navigate = useNavigate();
   const [file, setFile] = useState(null);
   const [importType, setImportType] = useState("gk");
   const [language, setLanguage] = useState("eng+urd");
@@ -737,6 +739,13 @@ export default function QuestionImport() {
   return (
     <main className="import-page">
       <header className="import-heading">
+        <button
+  type="button"
+  className="back-to-question-bank"
+  onClick={() => navigate("/admin/questions")}
+>
+  ← Back to Question Bank
+</button>
         <h1>QUESTION BANK IMPORT</h1>
         <p>
           Import General Knowledge papers or original Islamic book questions.
