@@ -569,7 +569,24 @@ function CandidateExam() {
       setExamName(
         data.exam_name || exam?.exam_name || "ISLAMIC QUIZ 2026"
       );
-      setQuestions(data.questions);
+      setQuestions(
+  data.questions.map((q) => ({
+    ...q,
+    question_text:
+      selectedLanguage === "ur"
+        ? q.question_text_ur || q.question_text
+        : q.question_text,
+    options_original: q.options,
+    options:
+      selectedLanguage === "ur"
+        ? q.options_ur || q.options
+        : q.options,
+    explanation:
+      selectedLanguage === "ur"
+        ? q.explanation_ur || q.explanation
+        : q.explanation,
+  }))
+);
       setAnswers({});
       setSecondsLeft(
         Math.max(

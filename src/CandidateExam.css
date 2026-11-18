@@ -540,3 +540,22 @@
     grid-template-columns: repeat(5, 1fr);
   }
 }
+.candidate-question-content h2 {
+  color: #173d32 !important;
+  opacity: 1 !important;
+}
+
+.candidate-question-content h2[dir="rtl"] {
+  direction: rtl;
+  text-align: right;
+  font-family: "Noto Nastaliq Urdu", "Jameel Noori Nastaleeq", serif;
+  line-height: 2.2;
+  font-weight: 600;
+  color: #173d32 !important;
+  opacity: 1 !important;
+}
+
+.candidate-option {
+  color: #173d32 !important;
+  opacity: 1 !important;
+}
