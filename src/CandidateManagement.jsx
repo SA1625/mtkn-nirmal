@@ -220,6 +220,44 @@ export default function CandidateManagement() {
     }
   };
 
+  // Fix a blocked candidate attempt that was already marked submitted.
+  // The database RPC performs the privileged update and writes an audit record.
+  const fixSubmittedAttempt = async (attempt) => {
+    const confirmed = window.confirm(
+      "FIX BLOCKED ATTEMPT?\\n\\n" +
+        "This will mark this submitted attempt as revoked so the candidate can start a fresh attempt.\\n\\n" +
+        "The previous attempt will remain in the database and an admin audit record will be created.\\n\\n" +
+        "Continue?"
+    );
+
+    if (!confirmed) return;
+
+    setBusyAttempt(attempt.id);
+    setError("");
+    setNotice("");
+
+    try {
+      const { data, error: fixError } = await supabase.rpc(
+        "admin_fix_candidate_attempt",
+        { p_attempt_id: attempt.id }
+      );
+
+      if (fixError) throw fixError;
+      if (data?.success !== true) {
+        throw new Error(data?.message || "Attempt fix was not confirmed.");
+      }
+
+      await loadAttempts(selected, { keepNotice: true });
+      setNotice(
+        "SUCCESS! The blocked submitted attempt has been revoked. The previous record is preserved and the candidate can start a fresh attempt."
+      );
+    } catch (err) {
+      setError(err.message || "Unable to fix this attempt.");
+    } finally {
+      setBusyAttempt("");
+    }
+  };
+
   const filtered = useMemo(() => {
     const term = search.trim().toLowerCase();
 
@@ -533,6 +571,30 @@ export default function CandidateManagement() {
                               {busyAttempt === attempt.id
                                 ? "Revoking..."
                                 : "Revoke Termination"}
+                            </button>
+                          </div>
+                        )}
+
+                        {attempt.status === "submitted" && (
+                          <div style={s.terminationBox}>
+                            <strong>Candidate unable to restart?</strong>
+                            <p>
+                              Use this only when the candidate is blocked by an old
+                              submitted attempt and needs a fresh attempt.
+                            </p>
+                            <button
+                              style={{
+                                ...s.revokeButton,
+                                opacity: busyAttempt === attempt.id ? 0.6 : 1,
+                              }}
+                              disabled={busyAttempt === attempt.id}
+                              onClick={() => fixSubmittedAttempt(attempt)}
+                              type="button"
+                            >
+                              <RotateCcw size={16} />
+                              {busyAttempt === attempt.id
+                                ? "Fixing..."
+                                : "Fix / Reopen Attempt"}
                             </button>
                           </div>
                         )}
