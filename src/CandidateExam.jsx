@@ -44,6 +44,90 @@ const formatOptions = (options) => {
   return [];
 };
 
+// Display translated labels while always saving the original English answer key.
+const getOptionEntries = (question, language, isTrueFalse = false) => {
+  if (isTrueFalse) {
+    return language === "ur"
+      ? [
+          { label: "درست", answer: "true" },
+          { label: "غلط", answer: "false" }
+        ]
+      : [
+          { label: "True", answer: "true" },
+          { label: "False", answer: "false" }
+        ];
+  }
+
+  const translated = question?.options || [];
+  const original = question?.options_original ?? question?.options ?? [];
+
+  if (Array.isArray(translated)) {
+    return translated.map((label, index) => ({
+      label: String(label),
+      answer: Array.isArray(original)
+        ? String(original[index] ?? "")
+        : String(original?.[index] ?? "")
+    }));
+  }
+
+  if (translated && typeof translated === "object") {
+    return Object.entries(translated).map(([key, label]) => ({
+      label: `${key}. ${label}`,
+      answer: key
+    }));
+  }
+
+  return [];
+};
+
+const displayReviewAnswer = (question, answer, language) => {
+  if (answer == null || answer === "") {
+    return language === "ur" ? "جواب نہیں دیا گیا" : "Not answered";
+  }
+
+  if (language !== "ur") return String(answer);
+
+  if (question?.question_type === "true_false") {
+    const normalized = String(answer).trim().toLowerCase();
+    if (normalized === "true") return "درست";
+    if (normalized === "false") return "غلط";
+  }
+
+  const original = question?.options_original;
+  const translated = question?.options;
+
+  if (Array.isArray(original) && Array.isArray(translated)) {
+    const normalizedAnswer = String(answer).trim().toLowerCase();
+    const letterMatch = normalizedAnswer.match(/^([a-d])(?:\\.|$)/);
+    const index = letterMatch
+      ? letterMatch[1].charCodeAt(0) - 97
+      : original.findIndex(
+          (item) => String(item).trim().toLowerCase() === normalizedAnswer
+        );
+    if (index >= 0 && index < translated.length) {
+      return `${String.fromCharCode(65 + index)}. ${String(translated[index] ?? answer)}`;
+    }
+  }
+
+  if (
+    original && typeof original === "object" && !Array.isArray(original) &&
+    translated && typeof translated === "object" && !Array.isArray(translated)
+  ) {
+    for (const [key, value] of Object.entries(original)) {
+      const normalizedAnswer = String(answer).trim().toLowerCase();
+      if (
+        normalizedAnswer === String(key).trim().toLowerCase() ||
+        normalizedAnswer === String(value).trim().toLowerCase() ||
+        normalizedAnswer === `${key}. ${value}`.trim().toLowerCase()
+      ) {
+        return `${key}. ${translated[key] ?? value}`;
+      }
+    }
+  }
+
+  return String(answer);
+};
+
 function printHTML(title, body) {
   const documentHTML = `
     <!doctype html>
@@ -218,6 +302,8 @@ function CandidateExam() {
 
   const [stage, setStage] = useState("instructions");
   const [agreed, setAgreed] = useState(false);
+  const [selectedLanguage, setSelectedLanguage] = useState("en");
+  const [attemptLanguage, setAttemptLanguage] = useState("en");
   const [questions, setQuestions] = useState([]);
   const [exam, setExam] = useState(null);
   const [examName, setExamName] = useState("ISLAMIC QUIZ 2026");
@@ -461,7 +547,8 @@ function CandidateExam() {
       const { data, error: startError } = await supabase.rpc(
         "start_quiz_exam",
         {
-          p_exam_id: examId
+          p_exam_id: examId,
+          p_language: selectedLanguage
         }
       );
 
@@ -478,6 +565,7 @@ function CandidateExam() {
       }
 
       setAttemptId(data.attempt_id);
+      setAttemptLanguage(data.language || selectedLanguage);
       setExamName(
         data.exam_name || exam?.exam_name || "ISLAMIC QUIZ 2026"
       );
@@ -955,6 +1043,60 @@ function CandidateExam() {
           <h1>EXAMINATION INSTRUCTIONS</h1>
           <p className="candidate-exam-subtitle">{examName}</p>
 
+          <section
+            aria-label="Choose examination language"
+            style={{
+              margin: "18px 0",
+              padding: 16,
+              border: "1px solid #dce7df",
+              borderRadius: 12,
+              background: "#ffffff"
+            }}
+          >
+            <h3 style={{ margin: "0 0 12px", textAlign: "center" }}>
+              Choose Paper Language / زبان منتخب کریں
+            </h3>
+            <div style={{ display: "flex", gap: 12, justifyContent: "center", flexWrap: "wrap" }}>
+              <button
+                type="button"
+                onClick={() => setSelectedLanguage("en")}
+                aria-pressed={selectedLanguage === "en"}
+                style={{
+                  minWidth: 130,
+                  padding: "12px 20px",
+                  borderRadius: 9,
+                  border: selectedLanguage === "en" ? "2px solid #08734e" : "1px solid #cbd5d0",
+                  background: selectedLanguage === "en" ? "#eaf5ef" : "#fff",
+                  color: "#173d32",
+                  fontWeight: 700
+                }}
+              >
+                English
+              </button>
+              <button
+                type="button"
+                onClick={() => setSelectedLanguage("ur")}
+                aria-pressed={selectedLanguage === "ur"}
+                style={{
+                  minWidth: 130,
+                  padding: "12px 20px",
+                  borderRadius: 9,
+                  border: selectedLanguage === "ur" ? "2px solid #08734e" : "1px solid #cbd5d0",
+                  background: selectedLanguage === "ur" ? "#eaf5ef" : "#fff",
+                  color: "#173d32",
+                  fontWeight: 700,
+                  direction: "rtl",
+                  fontFamily: "'Noto Nastaliq Urdu', 'Jameel Noori Nastaleeq', serif"
+                }}
+              >
+                اردو
+              </button>
+            </div>
+            <p style={{ margin: "10px 0 0", textAlign: "center", color: "#687970", fontSize: 13 }}>
+              Language cannot be changed after the examination starts.
+            </p>
+          </section>
+
           <div className="candidate-instruction-grid">
             <article className="instruction-blue">
               <strong>EXAMINATION PATTERN</strong>
@@ -1214,10 +1356,23 @@ function CandidateExam() {
           </div>
 
           {reviewQuestions.map((q, index) => {
-            const correctAnswer = isCorrectAnswer(
-              q,
+            const reviewLanguage = review?.language || attemptLanguage;
+            const originalQuestion = {
+              ...q,
+              options: q.options_original ?? q.options
+            };
+            const correctAnswer = q.is_correct ?? isCorrectAnswer(
+              originalQuestion,
               q.selected_answer
             );
+            const questionStyle = reviewLanguage === "ur"
+              ? {
+                  direction: "rtl",
+                  textAlign: "right",
+                  fontFamily: "'Noto Nastaliq Urdu', 'Jameel Noori Nastaleeq', serif",
+                  lineHeight: 2
+                }
+              : {};
 
             return (
               <article
@@ -1230,28 +1385,29 @@ function CandidateExam() {
                   textAlign: "left"
                 }}
               >
-                <strong>
+                <strong style={questionStyle}>
                   Q{index + 1}. {q.question_text}
                 </strong>
 
-                <p>
-                  Your answer:{" "}
-                  <b>{q.selected_answer || "Not answered"}</b>
+                <p style={questionStyle}>
+                  {reviewLanguage === "ur" ? "آپ کا جواب:" : "Your answer:"}{" "}
+                  <b>{displayReviewAnswer(q, q.selected_answer, reviewLanguage)}</b>
                 </p>
 
-                <p>
-                  Correct answer: <b>{q.correct_answer}</b>
+                <p style={questionStyle}>
+                  {reviewLanguage === "ur" ? "درست جواب:" : "Correct answer:"}{" "}
+                  <b>{displayReviewAnswer(q, q.correct_answer, reviewLanguage)}</b>
                 </p>
 
-                <p className={correctAnswer ? "correct" : "wrong"}>
-                  {correctAnswer
-                    ? "Correct · +1 mark"
-                    : "Incorrect / Unanswered · 0 marks"}
+                <p className={correctAnswer ? "correct" : "wrong"} style={questionStyle}>
+                  {reviewLanguage === "ur"
+                    ? (correctAnswer ? "درست · +1 نمبر" : "غلط / جواب نہیں دیا · 0 نمبر")
+                    : (correctAnswer ? "Correct · +1 mark" : "Incorrect / Unanswered · 0 marks")}
                 </p>
 
                 {q.explanation && (
-                  <p className="muted">
-                    Explanation: {q.explanation}
+                  <p className="muted" style={questionStyle}>
+                    {reviewLanguage === "ur" ? "وضاحت:" : "Explanation:"} {q.explanation}
                   </p>
                 )}
               </article>
@@ -1283,9 +1439,19 @@ function CandidateExam() {
   const isTrueFalse =
     currentQuestion.question_type === "true_false";
 
-  const options = isTrueFalse
-    ? ["True", "False"]
-    : formatOptions(currentQuestion.options);
+  const options = getOptionEntries(
+    currentQuestion,
+    attemptLanguage,
+    isTrueFalse
+  );
+  const questionTextStyle = attemptLanguage === "ur"
+    ? {
+        direction: "rtl",
+        textAlign: "right",
+        fontFamily: "'Noto Nastaliq Urdu', 'Jameel Noori Nastaleeq', serif",
+        lineHeight: 2
+      }
+    : {};
 
   return (
     <main className="candidate-exam-page candidate-live-exam">
@@ -1332,25 +1498,26 @@ function CandidateExam() {
           </div>
 
           <div className="candidate-question-content">
-            <h2>{currentQuestion.question_text}</h2>
+            <h2 style={questionTextStyle}>{currentQuestion.question_text}</h2>
 
             <div className="candidate-options">
               {options.map((option, index) => (
                 <button
-                  key={`${index}-${option}`}
+                  key={`${index}-${option.answer}`}
                   className={`candidate-option ${
-                    currentAnswer === option ? "chosen" : ""
+                    currentAnswer === option.answer ? "chosen" : ""
                   }`}
-                  onClick={() => chooseAnswer(option)}
+                  onClick={() => chooseAnswer(option.answer)}
                   disabled={saving || submitting.current}
+                  style={attemptLanguage === "ur" ? { direction: "rtl", textAlign: "right" } : {}}
                 >
                   <span>
                     {isTrueFalse
-                      ? option === "True" ? "T" : "F"
+                      ? index === 0 ? "T" : "F"
                       : String.fromCharCode(65 + index)}
                   </span>
 
-                  {option}
+                  {option.label}
                 </button>
               ))}
             </div>
