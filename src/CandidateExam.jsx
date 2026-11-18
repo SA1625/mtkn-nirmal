@@ -45,22 +45,16 @@ const formatOptions = (options) => {
 };
 
 function printHTML(title, body) {
-  const popup = window.open("", "_blank", "width=950,height=800");
-
-  if (!popup) {
-    alert("Please allow pop-ups to save your PDF report.");
-    return;
-  }
-
-  popup.document.open();
-  popup.document.write(`
+  const documentHTML = `
     <!doctype html>
     <html>
     <head>
       <meta charset="UTF-8"/>
+      <meta name="viewport" content="width=device-width, initial-scale=1"/>
       <title>${escapeHTML(title)}</title>
       <style>
         *{box-sizing:border-box}
+        @page{size:A4;margin:14mm}
         body{font-family:Arial,sans-serif;color:#173d32;margin:0;padding:25px}
         .sheet{max-width:850px;margin:auto;border:2px solid #176b50;padding:28px}
         header{text-align:center;border-bottom:2px solid #176b50;padding-bottom:16px}
@@ -77,8 +71,8 @@ function printHTML(title, body) {
         .wrong{color:#b42318;font-weight:bold}
         .muted{color:#687970}
         .actions{text-align:center;margin:22px}
-        button{background:#176b50;color:white;border:0;padding:12px 24px;border-radius:6px}
-        @media print{body{padding:0}.actions{display:none}.sheet{border:0}}
+        button{background:#176b50;color:white;border:0;padding:12px 24px;border-radius:6px;font-size:15px}
+        @media print{body{padding:0}.actions{display:none}.sheet{border:0;max-width:none;padding:0}}
       </style>
     </head>
     <body>
@@ -93,11 +87,75 @@ function printHTML(title, body) {
       <div class="actions">
         <button onclick="window.print()">Print / Save as PDF</button>
       </div>
-      <script>window.onload=()=>window.focus()</script>
+      <script>
+        window.addEventListener("load", function () {
+          setTimeout(function () {
+            window.focus();
+            try { window.print(); } catch (e) {}
+          }, 500);
+        });
+      </script>
     </body>
     </html>
-  `);
-  popup.document.close();
+  `;
+
+  // Open the printable report directly from the button click.
+  // This works with the Android browser's "Save as PDF" print destination.
+  let popup = null;
+
+  try {
+    popup = window.open("", "_blank");
+  } catch (error) {
+    popup = null;
+  }
+
+  if (popup) {
+    popup.document.open();
+    popup.document.write(documentHTML);
+    popup.document.close();
+    return;
+  }
+
+  // Popup-blocked fallback: print the report from a temporary iframe.
+  // The iframe is removed after printing or when the page is closed.
+  const frame = document.createElement("iframe");
+  frame.setAttribute("title", "Result PDF");
+  frame.style.position = "fixed";
+  frame.style.right = "0";
+  frame.style.bottom = "0";
+  frame.style.width = "1px";
+  frame.style.height = "1px";
+  frame.style.border = "0";
+  frame.style.opacity = "0";
+  document.body.appendChild(frame);
+
+  const frameWindow = frame.contentWindow;
+  const frameDocument = frame.contentDocument;
+
+  if (!frameWindow || !frameDocument) {
+    frame.remove();
+    alert("Unable to open the PDF print window. Please allow pop-ups and try again.");
+    return;
+  }
+
+  frameDocument.open();
+  frameDocument.write(documentHTML);
+  frameDocument.close();
+
+  const cleanup = () => {
+    window.setTimeout(() => frame.remove(), 1000);
+  };
+
+  frameWindow.onafterprint = cleanup;
+  window.setTimeout(() => {
+    try {
+      frameWindow.focus();
+      frameWindow.print();
+    } catch (error) {
+      cleanup();
+      alert("Your browser blocked PDF printing. Open this page in Chrome and allow pop-ups to save the PDF.");
+    }
+  }, 700);
 }
 
 const isCorrectAnswer = (question, selectedAnswer) => {
