@@ -50,6 +50,17 @@ function AdminDashboard() {
   const [translationCount, setTranslationCount] = useState(0);
   const [translationBatch, setTranslationBatch] = useState(0);
 
+  // SIX-LEVEL EXAM MANAGEMENT
+  const [levelSeries, setLevelSeries] = useState([]);
+  const [levelLoading, setLevelLoading] = useState(false);
+  const [selectedLevel, setSelectedLevel] = useState(null);
+  const [levelQuestions, setLevelQuestions] = useState([]);
+  const [levelQuestionsLoading, setLevelQuestionsLoading] = useState(false);
+  const [editingQuestion, setEditingQuestion] = useState(null);
+  const [savingQuestion, setSavingQuestion] = useState(false);
+  const [levelNotice, setLevelNotice] = useState("");
+  const [levelError, setLevelError] = useState("");
+
   // LOAD ADMIN DASHBOARD
   const loadAdmin = useCallback(async () => {
     setLoading(true);
@@ -145,6 +156,34 @@ function AdminDashboard() {
       });
 
       setRecentExams(allExams.slice(0, 5));
+
+      // Load generated six-level exam papers. These are grouped by series_id.
+      const { data: generatedLevels, error: levelsError } = await supabase
+        .from("exams")
+        .select("id, exam_name, level_name, level_order, series_id, status, created_at")
+        .not("series_id", "is", null)
+        .order("created_at", { ascending: false });
+
+      if (levelsError) throw levelsError;
+
+      const grouped = new Map();
+      (generatedLevels || []).forEach((exam) => {
+        if (!grouped.has(exam.series_id)) grouped.set(exam.series_id, []);
+        grouped.get(exam.series_id).push(exam);
+      });
+
+      setLevelSeries(
+        [...grouped.entries()]
+          .map(([seriesId, exams]) => ({
+            seriesId,
+            exams: exams.sort((a, b) => Number(a.level_order) - Number(b.level_order)),
+          }))
+          .sort((a, b) => {
+            const aDate = new Date(a.exams[0]?.created_at || 0).getTime();
+            const bDate = new Date(b.exams[0]?.created_at || 0).getTime();
+            return bDate - aDate;
+          })
+      );
     } catch (err) {
       setError(err.message || "Unable to load admin dashboard.");
     } finally {
@@ -273,6 +312,91 @@ function AdminDashboard() {
       );
     } finally {
       setTranslatingUrdu(false);
+    }
+  };
+
+
+  // Open one generated level paper and load its assigned questions.
+  const openLevelPaper = async (exam) => {
+    setSelectedLevel(exam);
+    setLevelQuestions([]);
+    setLevelQuestionsLoading(true);
+    setLevelNotice("");
+    setLevelError("");
+    setEditingQuestion(null);
+
+    try {
+      const { data: assignments, error: assignmentError } = await supabase
+        .from("exam_questions")
+        .select("question_id")
+        .eq("exam_id", exam.id);
+
+      if (assignmentError) throw assignmentError;
+
+      const ids = (assignments || []).map((row) => row.question_id).filter(Boolean);
+      if (!ids.length) {
+        setLevelQuestions([]);
+        return;
+      }
+
+      const { data: questions, error: questionsError } = await supabase
+        .from("quiz_questions")
+        .select("*")
+        .in("id", ids);
+
+      if (questionsError) throw questionsError;
+
+      const byId = new Map((questions || []).map((question) => [question.id, question]));
+      setLevelQuestions(ids.map((id) => byId.get(id)).filter(Boolean));
+    } catch (err) {
+      setLevelError(err.message || "Unable to load questions for this level.");
+    } finally {
+      setLevelQuestionsLoading(false);
+    }
+  };
+
+  const saveLevelQuestion = async () => {
+    if (!editingQuestion?.id) return;
+
+    let parsedOptions = editingQuestion.options;
+    if (typeof parsedOptions === "string") {
+      try {
+        parsedOptions = JSON.parse(parsedOptions);
+      } catch {
+        setLevelError("Options must be valid JSON. Please correct the options field.");
+        return;
+      }
+    }
+
+    setSavingQuestion(true);
+    setLevelError("");
+    setLevelNotice("");
+
+    try {
+      const payload = {
+        question_text: editingQuestion.question_text,
+        question_type: editingQuestion.question_type,
+        options: parsedOptions,
+        correct_answer: editingQuestion.correct_answer,
+        explanation: editingQuestion.explanation,
+        topic: editingQuestion.topic,
+        difficulty: editingQuestion.difficulty,
+      };
+
+      const { error: updateError } = await supabase
+        .from("quiz_questions")
+        .update(payload)
+        .eq("id", editingQuestion.id);
+
+      if (updateError) throw updateError;
+
+      setLevelNotice("Question updated successfully. The original question record was retained.");
+      await openLevelPaper(selectedLevel);
+      setEditingQuestion(null);
+    } catch (err) {
+      setLevelError(err.message || "Unable to update this question.");
+    } finally {
+      setSavingQuestion(false);
     }
   };
 
@@ -660,6 +784,131 @@ function AdminDashboard() {
             );
           })}
         </section>
+
+
+        {/* SIX-LEVEL EXAM MANAGEMENT */}
+        <section className="six-level-management">
+          <div className="six-level-heading">
+            <div className="urdu-translation-icon"><BookMarked size={24} /></div>
+            <div>
+              <h2>Six-Level Exam Management</h2>
+              <p>Open a level paper to view, inspect and edit its assigned questions.</p>
+            </div>
+          </div>
+
+          {levelSeries.length === 0 ? (
+            <div className="six-level-empty">
+              No generated six-level examination series found yet. Generate the six papers from Examination Management first.
+            </div>
+          ) : (
+            <div className="six-level-series-list">
+              {levelSeries.map((series) => (
+                <div className="six-level-series" key={series.seriesId}>
+                  <div className="six-level-series-title">
+                    <strong>ISLAMIC QUIZ 2026 · SIX-LEVEL SERIES</strong>
+                    <span>{series.exams.length}/6 papers found</span>
+                  </div>
+                  <div className="six-level-grid">
+                    {["Foundation", "Beginner", "Intermediate", "Moderate", "Advanced", "Expert"].map((name, index) => {
+                      const exam = series.exams.find((item) => Number(item.level_order) === index + 1);
+                      return (
+                        <button
+                          type="button"
+                          key={`${series.seriesId}-${name}`}
+                          className={`six-level-card level-${index + 1}`}
+                          disabled={!exam}
+                          onClick={() => exam && openLevelPaper(exam)}
+                        >
+                          <span className="six-level-number">LEVEL {index + 1}</span>
+                          <strong>{exam?.level_name || name}</strong>
+                          <span>{exam ? `${(exam.status || "draft").toUpperCase()} · View questions` : "Paper not found"}</span>
+                        </button>
+                      );
+                    })}
+                  </div>
+                </div>
+              ))}
+            </div>
+          )}
+        </section>
+
+        {selectedLevel && (
+          <div className="level-modal-backdrop" role="presentation" onClick={(event) => {
+            if (event.target === event.currentTarget) {
+              setSelectedLevel(null);
+              setEditingQuestion(null);
+            }
+          }}>
+            <section className="level-modal" role="dialog" aria-modal="true" aria-label="Level question details">
+              <div className="level-modal-header">
+                <div>
+                  <span>LEVEL {selectedLevel.level_order} QUESTION BANK</span>
+                  <h2>{selectedLevel.level_name || selectedLevel.exam_name}</h2>
+                  <p>{selectedLevel.status || "draft"} · {levelQuestions.length} assigned questions</p>
+                </div>
+                <button type="button" onClick={() => { setSelectedLevel(null); setEditingQuestion(null); }} aria-label="Close">×</button>
+              </div>
+
+              {levelError && <div className="level-alert error">{levelError}</div>}
+              {levelNotice && <div className="level-alert success">{levelNotice}</div>}
+
+              {levelQuestionsLoading ? (
+                <p className="level-empty">Loading questions...</p>
+              ) : (
+                <>
+                  {!editingQuestion ? (
+                    <div className="level-question-list">
+                      {levelQuestions.map((question, index) => (
+                        <article className="level-question-item" key={question.id}>
+                          <div className="level-question-top">
+                            <span>QUESTION {index + 1} · {(question.question_type || "question").replace("_", " ").toUpperCase()}</span>
+                            <button type="button" onClick={() => {
+                              setLevelError("");
+                              setLevelNotice("");
+                              setEditingQuestion({
+                                ...question,
+                                options: typeof question.options === "string"
+                                  ? question.options
+                                  : JSON.stringify(question.options ?? {}, null, 2),
+                              });
+                            }}>Edit Question</button>
+                          </div>
+                          <strong>{question.question_text || "Question text missing"}</strong>
+                          <p>Topic: {question.topic || "—"} · Difficulty: {question.difficulty || "—"}</p>
+                          <pre>{JSON.stringify(question.options ?? {}, null, 2)}</pre>
+                          <p><b>Correct answer:</b> {String(question.correct_answer ?? "—")}</p>
+                          {question.explanation && <p><b>Explanation:</b> {question.explanation}</p>}
+                        </article>
+                      ))}
+                      {levelQuestions.length === 0 && (
+                        <div className="level-empty">No questions are currently assigned to this level paper.</div>
+                      )}
+                    </div>
+                  ) : (
+                    <div className="level-edit-form">
+                      <h3>Edit Question</h3>
+                      <label>Question text<textarea value={editingQuestion.question_text || ""} onChange={(e) => setEditingQuestion({ ...editingQuestion, question_text: e.target.value })} /></label>
+                      <label>Question type<input value={editingQuestion.question_type || ""} onChange={(e) => setEditingQuestion({ ...editingQuestion, question_type: e.target.value })} /></label>
+                      <label>Options (JSON)<textarea className="level-options-editor" value={editingQuestion.options || ""} onChange={(e) => setEditingQuestion({ ...editingQuestion, options: e.target.value })} /></label>
+                      <label>Correct answer<input value={editingQuestion.correct_answer ?? ""} onChange={(e) => setEditingQuestion({ ...editingQuestion, correct_answer: e.target.value })} /></label>
+                      <label>Explanation<textarea value={editingQuestion.explanation || ""} onChange={(e) => setEditingQuestion({ ...editingQuestion, explanation: e.target.value })} /></label>
+                      <div className="level-edit-row">
+                        <label>Topic<input value={editingQuestion.topic || ""} onChange={(e) => setEditingQuestion({ ...editingQuestion, topic: e.target.value })} /></label>
+                        <label>Difficulty<input value={editingQuestion.difficulty || ""} onChange={(e) => setEditingQuestion({ ...editingQuestion, difficulty: e.target.value })} /></label>
+                      </div>
+                      <div className="level-edit-actions">
+                        <button type="button" className="level-cancel" onClick={() => setEditingQuestion(null)}>Cancel</button>
+                        <button type="button" className="level-save" onClick={saveLevelQuestion} disabled={savingQuestion}>
+                          {savingQuestion ? "Saving..." : "Save Changes"}
+                        </button>
+                      </div>
+                    </div>
+                  )}
+                </>
+              )}
+            </section>
+          </div>
+        )}
 
         {/* PORTAL MANAGEMENT */}
 
@@ -1195,6 +1444,60 @@ function AdminDashboard() {
           to { transform: rotate(360deg); }
         }
 
+
+         /* SIX-LEVEL EXAM MANAGEMENT */
+         .six-level-management {
+           background: #fff;
+           border: 1px solid #dce9e0;
+           border-radius: 15px;
+           padding: 22px;
+           margin: 24px 0;
+           box-shadow: 0 3px 12px rgba(23, 61, 50, 0.04);
+         }
+         .six-level-heading { display:flex; align-items:center; gap:12px; margin-bottom:18px; }
+         .six-level-heading h2 { margin:0; color:#173d32; font-size:19px; }
+         .six-level-heading p { margin:4px 0 0; color:#718078; font-size:12px; }
+         .six-level-series { border:1px solid #e2eae4; border-radius:12px; padding:15px; margin-top:13px; }
+         .six-level-series-title { display:flex; justify-content:space-between; gap:10px; flex-wrap:wrap; color:#176b50; font-size:12px; margin-bottom:13px; }
+         .six-level-series-title span { color:#718078; }
+         .six-level-grid { display:grid; grid-template-columns:repeat(3,minmax(0,1fr)); gap:11px; }
+         .six-level-card { text-align:left; display:flex; flex-direction:column; gap:8px; padding:16px; border:1px solid #dce9e0; border-radius:11px; background:#fbfdfb; cursor:pointer; transition:transform .2s,box-shadow .2s; }
+         .six-level-card:hover:not(:disabled) { transform:translateY(-4px); box-shadow:0 8px 18px rgba(23,61,50,.1); }
+         .six-level-card:disabled { opacity:.48; cursor:not-allowed; }
+         .six-level-card strong { color:#173d32; font-size:15px; }
+         .six-level-card span:last-child { color:#718078; font-size:11px; }
+         .six-level-number { color:#176b50; font-size:10px; font-weight:800; letter-spacing:.8px; }
+         .level-2 { background:#f5f9ff; } .level-3 { background:#faf7ff; } .level-4 { background:#fffaf1; } .level-5 { background:#f2fbfa; } .level-6 { background:#fff7f6; }
+         .six-level-empty,.level-empty { padding:18px; border:1px dashed #d6e2da; border-radius:9px; color:#718078; font-size:13px; }
+         .level-modal-backdrop { position:fixed; inset:0; z-index:1000; display:flex; justify-content:center; align-items:center; padding:18px; background:rgba(10,30,22,.58); }
+         .level-modal { width:min(900px,100%); max-height:90vh; overflow:auto; padding:22px; background:#fff; border-radius:15px; box-shadow:0 20px 60px rgba(0,0,0,.2); }
+         .level-modal-header { display:flex; justify-content:space-between; align-items:flex-start; gap:15px; padding-bottom:15px; margin-bottom:15px; border-bottom:1px solid #e6eee8; }
+         .level-modal-header span { color:#a17c35; font-size:10px; font-weight:800; letter-spacing:1px; }
+         .level-modal-header h2 { margin:5px 0; color:#14583e; }
+         .level-modal-header p { margin:0; color:#718078; font-size:12px; }
+         .level-modal-header button { border:0; border-radius:8px; padding:5px 12px; background:#f1f5f2; font-size:25px; cursor:pointer; }
+         .level-question-list { display:grid; gap:12px; }
+         .level-question-item { padding:15px; border:1px solid #e4ebe6; border-radius:10px; }
+         .level-question-top { display:flex; justify-content:space-between; gap:10px; align-items:center; margin-bottom:10px; }
+         .level-question-top span { color:#176b50; font-size:10px; font-weight:800; }
+         .level-question-top button,.level-save { border:0; border-radius:7px; padding:8px 12px; color:#fff; background:#176b50; font-weight:700; cursor:pointer; }
+         .level-question-item strong { display:block; color:#173d32; line-height:1.5; }
+         .level-question-item p { color:#718078; font-size:12px; }
+         .level-question-item pre { max-height:130px; overflow:auto; padding:10px; background:#f6f8f6; border-radius:7px; font-size:11px; white-space:pre-wrap; }
+         .level-edit-form { display:grid; gap:12px; }
+         .level-edit-form h3 { color:#14583e; margin:0; }
+         .level-edit-form label { display:grid; gap:6px; color:#476455; font-size:12px; font-weight:700; }
+         .level-edit-form input,.level-edit-form textarea { width:100%; box-sizing:border-box; border:1px solid #d6e2da; border-radius:8px; padding:10px; font:inherit; color:#173d32; }
+         .level-edit-form textarea { min-height:85px; resize:vertical; }
+         .level-edit-form .level-options-editor { min-height:150px; font-family:monospace; }
+         .level-edit-row { display:grid; grid-template-columns:1fr 1fr; gap:12px; }
+         .level-edit-actions { display:flex; justify-content:flex-end; gap:9px; }
+         .level-cancel { border:1px solid #d6e2da; border-radius:7px; padding:9px 14px; background:#fff; color:#476455; cursor:pointer; }
+         .level-save:disabled { opacity:.6; cursor:wait; }
+         .level-alert { margin:10px 0; padding:11px; border-radius:8px; font-size:12px; }
+         .level-alert.error { background:#fff1f0; color:#b42318; }
+         .level-alert.success { background:#ecfdf3; color:#067647; }
+
         /* MOBILE RESPONSIVE */
 
         @media (max-width: 600px) {
@@ -1233,6 +1536,16 @@ function AdminDashboard() {
           .admin-translation-button {
             width: 100%;
           }
+        }
+
+
+        @media (max-width: 700px) {
+          .six-level-grid { grid-template-columns:repeat(2,minmax(0,1fr)); }
+          .six-level-management { padding:15px; }
+          .level-modal { padding:15px; }
+        }
+        @media (max-width: 430px) {
+          .six-level-grid,.level-edit-row { grid-template-columns:1fr; }
         }
 
         @media (prefers-reduced-motion: reduce) {
